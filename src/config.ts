@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { DEFAULT_ACK_TIMEOUT_SECONDS } from './whatsapp/delivery.js';
 
 const bool = z
   .string()
@@ -47,6 +48,8 @@ const envSchema = z.object({
   WA_SESSION_PATH: str('./wa-session'),
   WA_CLIENT_ID: str('clash-report-bot'),
   PUPPETEER_EXECUTABLE_PATH: optStr,
+  // Prazo para o WhatsApp confirmar cada envio (ACK do servidor). Sem confirmação, o item fica "uncertain".
+  WA_ACK_TIMEOUT_SECONDS: int(DEFAULT_ACK_TIMEOUT_SECONDS, 5),
 
   // Fontes de anúncios
   SOURCE_BLOG_ENABLED: bool.transform((v) => v ?? true),
@@ -86,7 +89,7 @@ export interface AppConfig {
   dbPath: string;
   previewDir: string;
   coc: { token?: string; base: string; clanTag?: string };
-  wa: { groupId?: string; expectedGroupName?: string; sessionPath: string; clientId: string; executablePath?: string };
+  wa: { groupId?: string; expectedGroupName?: string; sessionPath: string; clientId: string; executablePath?: string; ackTimeoutSeconds: number };
   sources: { blog: boolean; inbox: boolean; locale: string };
   schedule: {
     monthlyCron: string;
@@ -115,6 +118,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (e.WHATSAPP_GROUP_ID && !e.WHATSAPP_GROUP_ID.endsWith('@g.us')) {
     throw new Error('WHATSAPP_GROUP_ID deve ser o ID de um grupo (termina com @g.us)');
   }
+  // O lease cobre uma parte (renovado a cada parte); precisa sobrar tempo além da espera pelo ACK.
+  if (e.SEND_LEASE_SECONDS < e.WA_ACK_TIMEOUT_SECONDS + 30) {
+    throw new Error('SEND_LEASE_SECONDS deve ser pelo menos WA_ACK_TIMEOUT_SECONDS + 30');
+  }
   return {
     dryRun: e.DRY_RUN,
     logLevel: e.LOG_LEVEL,
@@ -128,6 +135,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       sessionPath: e.WA_SESSION_PATH,
       clientId: e.WA_CLIENT_ID,
       executablePath: e.PUPPETEER_EXECUTABLE_PATH,
+      ackTimeoutSeconds: e.WA_ACK_TIMEOUT_SECONDS,
     },
     sources: { blog: e.SOURCE_BLOG_ENABLED, inbox: e.SOURCE_INBOX_ENABLED, locale: e.SOURCE_LOCALE },
     schedule: {

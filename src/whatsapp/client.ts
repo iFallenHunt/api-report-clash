@@ -1,6 +1,8 @@
 import type { AppConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import type { Sender } from '../outbox/worker.js';
+import { ackClientFrom, sendAndWaitForAck } from './ack.js';
+import type { DeliveryReceipt } from './delivery.js';
 import { listGroupsFrom, type ChatSummary, type GroupListing } from './groups.js';
 
 /** O mínimo dos módulos internos do WhatsApp Web lido em `readChatSummaries` (roda no navegador). */
@@ -22,8 +24,8 @@ interface WaWebWindow {
  * - Sessão persistida em disco (LocalAuth) no volume WA_SESSION_PATH.
  * - Envio restrito ao grupo configurado (WHATSAPP_GROUP_ID, termina com @g.us).
  * - Nenhum handler de mensagens recebidas é registrado: o bot não lê nem armazena conversas.
- * - O WhatsApp pode aceitar a mensagem sem que este processo persista a confirmação
- *   (queda entre o envio e a gravação). Ver docs sobre entrega incerta.
+ * - `send` só resolve com ACK do WhatsApp (ver `sendAndWaitForAck` e `delivery.ts`); sem confirmação,
+ *   lança `UncertainDeliveryError` e o item fica `uncertain`, sem reenvio automático.
  */
 /**
  * Carrega whatsapp-web.js a partir deste projeto ESM.
@@ -43,6 +45,8 @@ export class WhatsAppSender implements Sender {
   private client: import('whatsapp-web.js').Client | null = null;
   private ready = false;
   private groupVerified = false;
+  /** Abortado em `stop()`: encerra esperas de ACK em andamento e remove seus listeners. */
+  private lifecycle = new AbortController();
 
   constructor(private readonly cfg: AppConfig, private readonly log: Logger) {}
 
@@ -52,6 +56,7 @@ export class WhatsAppSender implements Sender {
 
   async start(opts: { onQr?: (qr: string) => void } = {}): Promise<void> {
     const { Client, LocalAuth } = await loadWhatsAppWeb();
+    this.lifecycle = new AbortController();
     const qrcode = (await import('qrcode-terminal')).default;
     this.client = new Client({
       authStrategy: new LocalAuth({ clientId: this.cfg.wa.clientId, dataPath: this.cfg.wa.sessionPath }),
@@ -91,14 +96,22 @@ export class WhatsAppSender implements Sender {
     return true;
   }
 
-  async send(text: string): Promise<string | null> {
+  /**
+   * Envia ao grupo configurado e aguarda o ACK. Erros até antes de `sendMessage` são falhas comuns
+   * (nada foi enviado); a partir dele, só há sucesso com confirmação ou `UncertainDeliveryError`.
+   */
+  async send(text: string): Promise<DeliveryReceipt> {
     const groupId = this.cfg.wa.groupId;
     if (!groupId) throw new Error('WHATSAPP_GROUP_ID não configurado');
     if (!groupId.endsWith('@g.us')) throw new Error('destino não é um grupo');
     if (!this.client || !this.ready) throw new Error('WhatsApp não está pronto');
+    if (this.client.pupPage?.isClosed() !== false) throw new Error('página do WhatsApp Web fechada');
     await this.verifyGroup(groupId);
-    const msg = await this.client.sendMessage(groupId, text);
-    return msg?.id?._serialized ?? null;
+    return sendAndWaitForAck(ackClientFrom(this.client), groupId, text, {
+      timeoutMs: this.cfg.wa.ackTimeoutSeconds * 1000,
+      log: this.log,
+      signal: this.lifecycle.signal,
+    });
   }
 
   /**
@@ -153,6 +166,7 @@ export class WhatsAppSender implements Sender {
 
   async stop() {
     this.ready = false;
+    this.lifecycle.abort();
     await this.client?.destroy().catch(() => undefined);
     this.client = null;
   }
