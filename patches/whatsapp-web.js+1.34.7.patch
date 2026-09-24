@@ -1,0 +1,58 @@
+diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+index 540078a..73c3a39 100644
+--- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
++++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
+@@ -3,6 +3,39 @@
+ exports.LoadUtils = () => {
+     window.WWebJS = {};
+ 
++    // [api-report-clash patch] Based on wwebjs/whatsapp-web.js#201901 (1a94695).
++    // WA Web 2.3000.1043xxx+ no longer sets `_serialized` on a MsgKey: the
++    // constructor stores the joined key in the minified `$1`, returned by
++    // `toString()`. Every page-side `Msg.get(key._serialized)` then looks up
++    // `undefined` (e.g. the end of `WWebJS.sendMessage`). Restore it as a
++    // prototype getter; the setter keeps builds that still assign it in the
++    // constructor working (own property shadows the getter). Guarded so a
++    // future change here cannot abort the rest of LoadUtils.
++    try {
++        const MsgKeyProto = window.require('WAWebMsgKey')?.prototype;
++        if (
++            MsgKeyProto &&
++            !Object.getOwnPropertyDescriptor(MsgKeyProto, '_serialized')
++        ) {
++            Object.defineProperty(MsgKeyProto, '_serialized', {
++                get() {
++                    return this.toString();
++                },
++                set(value) {
++                    Object.defineProperty(this, '_serialized', {
++                        value,
++                        writable: true,
++                        enumerable: true,
++                        configurable: true,
++                    });
++                },
++                configurable: true,
++            });
++        }
++    } catch (err) {
++        console.error('[api-report-clash patch] MsgKey._serialized', err);
++    }
++
+     /**
+      * Helper function that compares between two WWeb versions. Its purpose is to help the developer to choose the correct code implementation depending on the comparison value and the WWeb version.
+      * @param {string} lOperand The left operand for the WWeb version string to compare with
+@@ -829,8 +862,13 @@ exports.LoadUtils = () => {
+         }
+ 
+         if (typeof msg.id.remote === 'object') {
++            // [api-report-clash patch] Node-side half, cf. #201840: the
++            // prototype getter above is not an own property, so this copy (and
++            // Puppeteer's serialization) would drop it. Copy it explicitly so
++            // `Message.id._serialized` reaches Node (sendMessage, message_ack).
+             msg.id = Object.assign({}, msg.id, {
+                 remote: msg.id.remote._serialized,
++                _serialized: msg.id._serialized,
+             });
+         }
+ 

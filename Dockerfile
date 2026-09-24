@@ -3,6 +3,9 @@ FROM node:24-bookworm-slim AS build
 WORKDIR /app
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json package-lock.json ./
+# patches/ antes do npm ci: o postinstall (patch-package) corrige o whatsapp-web.js 1.34.7.
+# Sem a pasta, o patch-package não acha patches e a imagem sai sem a correção de envio.
+COPY patches ./patches
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
