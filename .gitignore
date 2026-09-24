@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+wa-session/
+.env
+*.log
+.wwebjs_auth/
+.wwebjs_cache/
+coverage/
