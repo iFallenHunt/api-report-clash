@@ -9,7 +9,8 @@ import { CONFIRMED_ACK, MessageAckLevel, UncertainDeliveryError, type DeliveryRe
  * `remote` (o chat; `WWebJS.getMessageModel` o converte para string). NÃO depende de `_serialized`: nas
  * versões do WhatsApp Web a partir de 2.3000.1043xxx a chave interna (`MsgKey`) deixou de expor
  * `_serialized` (wwebjs/whatsapp-web.js#201901), e é por isso que o `sendMessage` desta versão passou a
- * resolver `undefined`.
+ * resolver `undefined`. O patch local (`patches/whatsapp-web.js+1.34.7.patch`) devolve o `_serialized`, mas a
+ * correlação continua sem depender dele.
  */
 export interface MessageKey {
   id: string;

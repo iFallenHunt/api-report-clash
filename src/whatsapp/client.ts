@@ -139,9 +139,10 @@ export class WhatsAppSender implements Sender {
    * Lê id, nome e tipo dos chats direto da coleção do WhatsApp Web, sem tocar em mensagens.
    *
    * Não usa `client.getChats()`/`getChatById()`: no whatsapp-web.js 1.34.7 eles serializam cada chat com
-   * `WWebJS.getChatModel`, que também busca a última mensagem por `chat.lastReceivedKey._serialized`. Na versão
-   * atual do WhatsApp Web essa chave vem `undefined`, o IndexedDB rejeita (`DataError: No key or key range
-   * specified`) e o `Promise.all` derruba a listagem inteira com um erro minificado ("r"). Os critérios abaixo
+   * `WWebJS.getChatModel`, que também busca a última mensagem por `chat.lastReceivedKey._serialized`. Sem o patch
+   * local (MsgKey sem `_serialized`) essa chave vem `undefined`, o IndexedDB rejeita (`DataError: No key or key
+   * range specified`) e o `Promise.all` derruba a listagem inteira com um erro minificado ("r"); mesmo com o
+   * patch, carregar a última mensagem de cada chat é desnecessário (o bot não lê conversas). Os critérios abaixo
    * são os mesmos da biblioteca: `isGroup` = tem `groupMetadata`; nome = `formattedTitle`.
    */
   private async readChatSummaries(): Promise<ChatSummary[]> {
