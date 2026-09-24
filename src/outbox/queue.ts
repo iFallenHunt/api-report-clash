@@ -65,6 +65,11 @@ export class Outbox {
     return !!this.db.get('SELECT id FROM outbox WHERE mode = ? AND dedup_key = ?', this.mode, dedupKey);
   }
 
+  getByKey(dedupKey: string): OutboxItem | undefined {
+    const r = this.db.get<OutboxRow>('SELECT * FROM outbox WHERE mode = ? AND dedup_key = ?', this.mode, dedupKey);
+    return r ? toItem(r) : undefined;
+  }
+
   get(id: number): OutboxItem | undefined {
     const r = this.db.get<OutboxRow>('SELECT * FROM outbox WHERE id = ?', id);
     return r ? toItem(r) : undefined;

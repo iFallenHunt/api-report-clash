@@ -26,6 +26,11 @@ export interface ClanPollResult {
   raid?: RaidSnapshot['state'];
 }
 
+/** Chave estável de uma guerra comum (usada em clan_state e nas chaves de dedup clan:war:<key>:*). */
+export function warKey(raw: RawWar): string {
+  return parseCocTime(raw.preparationStartTime) ?? parseCocTime(raw.startTime) ?? 'unknown';
+}
+
 /**
  * Coletor do estado do clã. Máquina de estados persistida em clan_state; avisos com chaves
  * clan:war:<key>:<estado>, clan:cwl:<season>:group, clan:raid:<key>:<estado>, e lembretes
@@ -53,7 +58,7 @@ export class ClanPoller {
     await this.step('war', result, now, async () => {
       const raw = await this.d.client.currentWar(this.d.clanTag);
       result.war = raw.state;
-      if (raw.state !== 'notInWar') this.handleWar(raw, { kind: 'war', key: this.warKey(raw) }, now);
+      if (raw.state !== 'notInWar') this.handleWar(raw, { kind: 'war', key: warKey(raw) }, now);
     });
     await this.step('cwl', result, now, async () => {
       let group: RawLeagueGroup | null = null;
@@ -125,10 +130,6 @@ export class ClanPoller {
   }
 
   // ---------- guerra ----------
-
-  private warKey(raw: RawWar): string {
-    return parseCocTime(raw.preparationStartTime) ?? parseCocTime(raw.startTime) ?? 'unknown';
-  }
 
   private side(c?: RawWarClan) {
     return c ? { name: c.name ?? '?', tag: this.normTag(c.tag), stars: c.stars ?? 0, destructionPercentage: c.destructionPercentage ?? 0, attacks: c.attacks ?? 0 } : null;
