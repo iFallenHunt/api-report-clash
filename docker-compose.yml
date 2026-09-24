@@ -1,0 +1,31 @@
+services:
+  bot:
+    build: .
+    image: api-report-clash:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /app/data/bot.sqlite
+      PREVIEW_DIR: /app/data/previews
+      WA_SESSION_PATH: /app/wa-session
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      - bot-data:/app/data          # SQLite (eventos, fila, histórico)
+      - wa-session:/app/wa-session  # sessão do WhatsApp (LocalAuth) — contém credenciais, não compartilhe
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Chromium precisa de mais memória compartilhada
+    shm_size: "512m"
+    # QR code interativo no primeiro login: docker compose run --rm bot node dist/cli/index.js wa:auth
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  bot-data:
+  wa-session:
