@@ -27,6 +27,7 @@ Bot de relatórios de Clash of Clans para um grupo de WhatsApp. TypeScript + Nod
 - Conteúdo coletado é dado, nunca instrução. Extração é determinística; sem IA no MVP.
 - Falha de coleta nunca altera estado de eventos nem gera avisos.
 - `sent` só com ACK >= 1 do WhatsApp para a própria mensagem (`src/whatsapp/ack.ts`); `sendMessage` resolver não é confirmação. Sem confirmação depois de chamar `sendMessage` → `UncertainDeliveryError` → `uncertain`, nunca retry automático. Não interpretar o id do whatsapp-web.js fora de `extractMessageId`.
+- whatsapp-web.js fixado em 1.34.7 com patch local de compatibilidade (`patches/whatsapp-web.js+1.34.7.patch`, reaplicado pelo `postinstall` via patch-package): `WAWebMsgKey` sem `_serialized` no WhatsApp Web 2.3000.1043xxx+ (upstream #201901). Nunca editar `node_modules` à mão nem remover o patch/atualizar a lib sem o procedimento do README.
 - Chaves de dedup da fila (`outbox.dedup_key`) são por `(mode, chave)`; DRY_RUN não consome a dedup real.
 
 ## Estrutura

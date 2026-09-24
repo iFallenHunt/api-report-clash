@@ -71,6 +71,26 @@ Sem `COC_API_TOKEN`/`CLAN_TAG` o bot roda normalmente sem a parte do clã. Sem W
 - Atualizações do WhatsApp Web podem quebrar a biblioteca até sair uma nova versão.
 - O bot só envia para o grupo configurado e não registra handlers de mensagens recebidas: não lê nem armazena conversas.
 
+#### Patch local de compatibilidade (`patches/whatsapp-web.js+1.34.7.patch`)
+
+O whatsapp-web.js 1.34.7 precisa de um patch para funcionar com o WhatsApp Web 2.3000.1043xxx+. Nessas versões a chave interna da mensagem (`WAWebMsgKey`) deixou de ter `_serialized` (o valor ficou no campo minificado `$1`, exposto por `toString()`). Por isso `Msg.get(newMsgKey._serialized)` virava `Msg.get(undefined)` e o `sendMessage` resolvia `undefined`, sem Message nem id para correlacionar o ACK.
+
+- O patch segue o upstream: [wwebjs/whatsapp-web.js#201901](https://github.com/wwebjs/whatsapp-web.js/pull/201901) (getter `_serialized` → `toString()` no protótipo de `WAWebMsgKey`), mais uma linha em `getMessageModel` para o `id._serialized` chegar ao Node (a metade do Node da [#201840](https://github.com/wwebjs/whatsapp-web.js/pull/201840)). Só altera `src/util/Injected/Utils.js`.
+- É reaplicado automaticamente pelo `postinstall` (`patch-package --error-on-fail --error-on-warn`) em todo `npm install`/`npm ci`, inclusive no build do Docker (o `Dockerfile` copia `patches/` antes do `npm ci`). Se o patch não aplicar, a instalação falha em vez de seguir sem a correção.
+- A versão fica fixada em `"whatsapp-web.js": "1.34.7"`. **Não remova o patch nem atualize a biblioteca sem validar uma versão nova.**
+- O patch não substitui a confirmação por ACK: `sent` continua exigindo ACK >= 1; sem ACK, `uncertain`.
+- Para regenerar o patch depois de editar o pacote: `npm_config_allow_remote=root npx patch-package whatsapp-web.js` (o npm 12 bloqueia por padrão a instalação por URL de tarball que o patch-package usa para obter a cópia limpa; só vale para esse comando).
+- `tests/whatsapp-wwebjs-patch.test.ts` roda o código injetado real contra módulos falsos no formato atual e falha se o patch não estiver aplicado.
+
+Para verificar se uma versão nova já incorporou a correção e remover o patch:
+
+1. Ler o changelog/release em https://github.com/wwebjs/whatsapp-web.js/releases.
+2. Confirmar que a #201901 (ou commit equivalente) entrou: no `src/util/Injected/Utils.js` da versão nova, o `sendMessage` não pode mais depender de `newMsgKey._serialized` sem fallback, e `getMessageModel` precisa entregar `id._serialized` ao Node.
+3. Numa branch: atualizar `whatsapp-web.js` no `package.json` e apagar `patches/whatsapp-web.js+1.34.7.patch` (e o `postinstall`/`patch-package` se não houver outros patches).
+4. `rm -rf node_modules && npm ci`.
+5. `npm run check`. O teste de `tests/whatsapp-wwebjs-patch.test.ts` que confere o patch no pacote instalado vai falhar de propósito: ajuste-o para a versão nova, mantendo os casos de MsgKey sem `_serialized`.
+6. Um único `wa:test-send` controlado no grupo de testes: tem de terminar em "mensagem de teste confirmada pelo WhatsApp" com `ack: 1` e a mensagem aparecer no grupo.
+
 ## Docker Compose
 
 ```bash
