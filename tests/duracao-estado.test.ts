@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { findDeclaredDuration } from '../src/collectors/announcements/extract.js';
-import { runTestSend, type TestSender } from '../src/cli/test-send.js';
+import { formatTestSendResult, runTestSend, testSendExitCode, type TestSender } from '../src/cli/test-send.js';
+import { UncertainDeliveryError } from '../src/whatsapp/delivery.js';
 import { testConfig } from '../src/config.js';
 import { declaredDurationText, displayStatus, durationText } from '../src/domain/dates.js';
 import { eventSummaryLine, headline, whenLines } from '../src/messages/format.js';
@@ -105,7 +106,7 @@ describe('relatórios: títulos, seções vazias e revisão manual de recompensa
 describe('envio de teste do WhatsApp isolado', () => {
   function fake() {
     const sent: string[] = [];
-    const s: TestSender = { start: vi.fn(async () => undefined), waitReady: vi.fn(async () => true), send: vi.fn(async (t: string) => { sent.push(t); return 'id-1'; }), stop: vi.fn(async () => undefined) };
+    const s: TestSender = { start: vi.fn(async () => undefined), waitReady: vi.fn(async () => true), send: vi.fn(async (t: string) => { sent.push(t); return { messageId: 'id-1', ack: 1 }; }), stop: vi.fn(async () => undefined) };
     return { s, sent };
   }
   const cfg = () => {
@@ -119,6 +120,34 @@ describe('envio de teste do WhatsApp isolado', () => {
     expect(r.ok).toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('Teste do bot de relatórios');
+    expect(s.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirmado pelo WhatsApp: mostra id e ack e sai com 0', async () => {
+    const { s } = fake();
+    const r = await runTestSend(cfg(), { confirm: true, groupArg: 'Teste Bot', createSender: () => s });
+    expect(r).toMatchObject({ ok: true, messageId: 'id-1', ack: 1 });
+    const out = formatTestSendResult(r);
+    expect(out).toMatch(/^mensagem de teste confirmada pelo WhatsApp\nid: id-1\nack: 1/);
+    expect(testSendExitCode(r)).toBe(0);
+  });
+
+  it('sem confirmação: NÃO declara sucesso nem "enviada" e sai com código não-zero', async () => {
+    const { s } = fake();
+    s.send = vi.fn(async () => { throw new UncertainDeliveryError('sendMessage retornou sem Message ID correlacionável (retorno: undefined)'); });
+    const r = await runTestSend(cfg(), { confirm: true, groupArg: 'Teste Bot', createSender: () => s });
+    expect(r).toMatchObject({ ok: false, uncertain: true });
+    const out = formatTestSendResult(r);
+    expect(out).toMatch(/^ENVIO NÃO CONFIRMADO\nmotivo: sendMessage retornou sem Message ID/);
+    expect(out).not.toMatch(/enviada|confirmada/i);
+    expect(testSendExitCode(r)).not.toBe(0);
+    expect(s.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('erro comum antes do envio continua propagando (e encerra o cliente)', async () => {
+    const { s } = fake();
+    s.send = vi.fn(async () => { throw new Error('nome do grupo não confere'); });
+    await expect(runTestSend(cfg(), { confirm: true, groupArg: 'Teste Bot', createSender: () => s })).rejects.toThrow(/não confere/);
     expect(s.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -138,7 +167,13 @@ describe('envio de teste do WhatsApp isolado', () => {
   it('o módulo não importa fila, motor de avisos, agendador nem banco', () => {
     const src = readFileSync(join(import.meta.dirname, '..', 'src', 'cli', 'test-send.ts'), 'utf8');
     const imports = src.split('\n').filter((l) => l.startsWith('import'));
-    expect(imports).toEqual(["import type { AppConfig } from '../config.js';"]);
+    expect(imports).toEqual([
+      "import type { AppConfig } from '../config.js';",
+      "import { UncertainDeliveryError, type DeliveryReceipt } from '../whatsapp/delivery.js';",
+    ]);
+    // o módulo de semântica de entrega não importa nada
+    const delivery = readFileSync(join(import.meta.dirname, '..', 'src', 'whatsapp', 'delivery.ts'), 'utf8');
+    expect(delivery.split('\n').filter((l) => l.startsWith('import'))).toEqual([]);
     const cli = readFileSync(join(import.meta.dirname, '..', 'src', 'cli', 'index.ts'), 'utf8');
     // o ramo do teste retorna antes de buildApp()
     expect(cli.indexOf("if (cmd === 'wa:test-send')")).toBeLessThan(cli.indexOf('const app = buildApp(cfg, log);'));

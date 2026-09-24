@@ -10,7 +10,7 @@ import { formatGroupListing } from '../whatsapp/groups.js';
 import { seedDemo } from './demo.js';
 import { importFromFile } from './import.js';
 import { runCheck } from './check.js';
-import { runTestSend } from './test-send.js';
+import { formatTestSendResult, runTestSend, testSendExitCode } from './test-send.js';
 import { runPromote } from './promote.js';
 
 const HELP = `Uso: npm run cli -- <comando> [opções]
@@ -28,7 +28,8 @@ const HELP = `Uso: npm run cli -- <comando> [opções]
   review:resolve <id>              marca pendência como resolvida
   outbox:list [status]             fila de saída do modo atual (pending, sent, failed, uncertain...)
   outbox:resend <id>               reenfileira manualmente um item failed/uncertain/expired
-  outbox:run                       executa um ciclo do worker (envia se DRY_RUN=false)
+  outbox:run                       executa um ciclo do worker (envia se DRY_RUN=false); "sent" só com
+                                   confirmação (ACK) do WhatsApp, senão o item fica "uncertain" (sem reenvio)
   outbox:promote <id> --confirm
                                    promove explicitamente um item dry_run validado para a fila live
                                    (exige DRY_RUN=false; sem --confirm só mostra; nunca envia)
@@ -36,7 +37,8 @@ const HELP = `Uso: npm run cli -- <comando> [opções]
   demo:seed                        grava eventos FICTÍCIOS no banco configurado (só desenvolvimento)
   check                            diagnóstico somente leitura: configuração e API real do clã
   wa:test-send --confirm --group="<nome>"
-                                   envia UMA mensagem de teste, isolada (sem fila/agendador); funciona com DRY_RUN=true
+                                   envia UMA mensagem de teste, isolada (sem fila/agendador); funciona com DRY_RUN=true;
+                                   sai com código 3 se o WhatsApp não confirmar o envio
   wa:auth                          inicia o WhatsApp e mostra o QR para autenticar
   wa:chats                         lista os grupos (id e nome) para configurar WHATSAPP_GROUP_ID
 `;
@@ -68,10 +70,10 @@ async function main(argv: string[]) {
   if (cmd === 'wa:test-send') {
     const groupArg = rest.find((a) => a.startsWith('--group='))?.slice('--group='.length).replace(/^"|"$/g, '');
     const r = await runTestSend(cfg, { confirm: flags.has('--confirm'), groupArg, createSender: () => new WhatsAppSender(cfg, createLogger('info')) });
-    if (r.ok) console.log(`mensagem de teste enviada (id ${r.messageId ?? 'desconhecido'}); nenhum relatório ou aviso foi enviado`);
+    if (r.ok) console.log(formatTestSendResult(r));
     else {
-      console.error(`recusado: ${r.reason}`);
-      process.exitCode = 2;
+      console.error(formatTestSendResult(r));
+      process.exitCode = testSendExitCode(r);
     }
     return;
   }
