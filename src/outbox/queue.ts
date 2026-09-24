@@ -146,6 +146,20 @@ export class Outbox {
       this.mode === 'dry_run' ? 'dry_run' : 'sent', now, waMessageId, id);
   }
 
+  /** Renova o lease de um item em envio (a cada parte de uma mensagem dividida). */
+  extendLease(id: number, leaseSeconds: number, now = nowIso()) {
+    const lease = new Date(new Date(now).getTime() + leaseSeconds * 1000).toISOString();
+    this.db.run(`UPDATE outbox SET lease_until = ? WHERE id = ? AND status = 'sending'`, lease, id);
+  }
+
+  /**
+   * Entrega incerta: `sendMessage` foi chamado, mas o WhatsApp não confirmou. A mensagem pode ter chegado,
+   * então NÃO há reenvio automático (o worker só pega `pending`). Reenvio só manual (`outbox:resend`).
+   */
+  markUncertain(id: number, reason: string) {
+    this.db.run(`UPDATE outbox SET status = 'uncertain', last_error = ?, lease_until = NULL WHERE id = ?`, reason.slice(0, 500), id);
+  }
+
   /** Falha de envio: reagenda com backoff ou marca como failed ao esgotar tentativas. */
   markFailed(item: OutboxItem, error: string, maxAttempts: number, now = nowIso()): 'retry' | 'failed' {
     if (item.attempts >= maxAttempts) {
