@@ -110,6 +110,7 @@ As credenciais ficam só no arquivo `.env` na raiz do projeto (já criado a part
    ```bash
    npm run cli -- wa:test-send --confirm --group="Nome exato do grupo de testes"
    ```
+   Só imprime `mensagem de teste confirmada pelo WhatsApp` (com `id` e `ack`) quando o WhatsApp confirma o envio. Sem confirmação, imprime `ENVIO NÃO CONFIRMADO` com o motivo e sai com código 3: a mensagem pode ou não ter chegado, então confira o grupo antes de tentar de novo.
 
 ### Ativar o envio real no serviço
 
@@ -162,7 +163,9 @@ Regras anti-redundância: evento com duração menor que 2× a antecedência nã
 ## Entrega, falhas e recuperação (comportamento real)
 
 - **Não há garantia de entrega.** Cada item tem no máximo `SEND_MAX_ATTEMPTS` tentativas e uma validade; ao esgotar, fica `failed`; ao vencer, `expired`. Nenhum dos dois é reenviado automaticamente.
-- **Entrega incerta**: se o processo cair entre o envio e a gravação do resultado, o item fica preso em `sending`; na recuperação ele vira `uncertain` e **não é reenviado** (o WhatsApp pode ter aceitado a mensagem). Reenvio é decisão humana: `outbox:resend <id>`.
+- **Confirmação de envio**: um item só vira `sent` quando o WhatsApp devolve ACK ≥ 1 (`ACK_SERVER`: o servidor aceitou a mensagem) para a própria mensagem, correlacionada pelo id da chave (`id`, `remote`, `fromMe`) dentro de `WA_ACK_TIMEOUT_SECONDS` (padrão 30 s por parte). Não se espera entrega no aparelho nem leitura. `sendMessage` resolver sem erro **não** é confirmação.
+- **Entrega incerta** (`uncertain`, sem reenvio automático) quando `sendMessage` já foi chamado e não houve confirmação: retorno sem Message ID correlacionável, prazo do ACK esgotado, ACK de erro (-1), erro lançado pelo próprio `sendMessage` ou encerramento durante a espera. Numa mensagem dividida em partes, se alguma parte já foi confirmada, qualquer falha posterior deixa o item inteiro `uncertain` (o `last_error` diz qual parte falhou), porque reenviar duplicaria as partes que chegaram. Erros antes de chamar `sendMessage` (WhatsApp não pronto, grupo não verificado) seguem o retry normal.
+- **Queda durante o envio**: se o processo cair entre o envio e a gravação do resultado, o item fica preso em `sending`; na recuperação ele vira `uncertain` e **não é reenviado** (o WhatsApp pode ter aceitado a mensagem). Reenvio é decisão humana: `outbox:resend <id>`.
 - **Duplicatas**: a deduplicação é por chave persistida (`(mode, dedup_key)`), então reinícios e consultas repetidas não duplicam. A única fonte possível de duplicata é o reenvio manual de um item `uncertain`.
 - **WhatsApp desconectado**: o worker pausa; itens pendentes esperam até vencer.
 - **Fonte indisponível** (timeout, 429, 5xx, estrutura mudou): registrada em `collector_runs`; nenhum evento muda de estado; o rodapé dos relatórios avisa. Falha nunca vira "evento encerrado/cancelado".
