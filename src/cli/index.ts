@@ -11,6 +11,7 @@ import { seedDemo } from './demo.js';
 import { importFromFile } from './import.js';
 import { runCheck } from './check.js';
 import { runTestSend } from './test-send.js';
+import { runPromote } from './promote.js';
 
 const HELP = `Uso: npm run cli -- <comando> [opções]
 
@@ -28,6 +29,9 @@ const HELP = `Uso: npm run cli -- <comando> [opções]
   outbox:list [status]             fila de saída do modo atual (pending, sent, failed, uncertain...)
   outbox:resend <id>               reenfileira manualmente um item failed/uncertain/expired
   outbox:run                       executa um ciclo do worker (envia se DRY_RUN=false)
+  outbox:promote <id> --confirm
+                                   promove explicitamente um item dry_run validado para a fila live
+                                   (exige DRY_RUN=false; sem --confirm só mostra; nunca envia)
   poll:once announcements|clan     executa uma coleta agora
   demo:seed                        grava eventos FICTÍCIOS no banco configurado (só desenvolvimento)
   check                            diagnóstico somente leitura: configuração e API real do clã
@@ -181,6 +185,20 @@ async function main(argv: string[]) {
     case 'outbox:resend': {
       const it = app.outbox.requeue(Number(args[0]), cfg.delivery.noticeTtlHours);
       console.log(it ? `reenfileirado como #${it.id}` : 'item não encontrado');
+      break;
+    }
+
+    case 'outbox:promote': {
+      const client = cfg.coc.token && cfg.coc.clanTag ? new CocClient({ base: cfg.coc.base, token: cfg.coc.token }) : null;
+      const r = await runPromote(app.db, cfg, { id: Number(args[0]), confirm: flags.has('--confirm'), client });
+      if (!r.ok) {
+        console.error(`\nrecusado: ${r.reason}\nNada foi alterado.`);
+        process.exitCode = 2;
+      } else if (r.promoted) {
+        console.log(`\nItem dry_run #${args[0]} promovido para live (#${r.item.id}).\n`);
+        console.log(`kind: ${r.item.kind}\ndedup: ${r.item.dedupKey}\nstatus: ${r.item.status}\nexpira: ${r.item.expiresAt}\n`);
+        console.log('Nenhuma mensagem foi enviada.\nExecute `npm run cli -- outbox:run` para enviar.');
+      }
       break;
     }
 
