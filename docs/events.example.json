@@ -1,0 +1,38 @@
+{
+  "demo": true,
+  "events": [
+    {
+      "category": "medal_event",
+      "title": "[FICTÍCIO] Evento de Medalhas do Dragão",
+      "description": "Exemplo fictício de importação manual completa.",
+      "startAt": "2026-10-05T08:00:00Z",
+      "endAt": "2026-10-19T08:00:00Z",
+      "rewardsStatus": "known",
+      "rewards": [
+        { "label": "Medalhas do Dragão", "quantity": 1200, "condition": "completar a trilha do evento", "tier": "free" },
+        { "label": "Poção de Herói", "quantity": 3, "condition": "trocar na loja do Comerciante", "tier": "free" },
+        { "label": "Visual Rainha Dragão", "condition": "oferta do Passe do Evento", "tier": "paid" },
+        { "label": "Livro de Feitiços", "quantity": 1, "tier": "free", "choiceGroup": "nivel10", "condition": "nível 10 da trilha: escolha 1" },
+        { "label": "Poção de Construtor", "quantity": 2, "tier": "free", "choiceGroup": "nivel10" }
+      ],
+      "sourceUrl": "https://supercell.com/en/games/clashofclans/pt/blog/news/exemplo-ficticio",
+      "lock": true
+    },
+    {
+      "category": "clan_games",
+      "title": "[FICTÍCIO] Jogos do Clã",
+      "startAt": "2026-10-22",
+      "endAt": "2026-10-28",
+      "rewardsStatus": "not_announced",
+      "sourceUrl": "https://supercell.com/en/games/clashofclans/pt/blog/news/exemplo-ficticio-2"
+    },
+    {
+      "id": "evt_substitua_pelo_id_existente",
+      "category": "medal_event",
+      "title": "[FICTÍCIO] Complementa um evento já coletado (só recompensas)",
+      "rewardsStatus": "known",
+      "rewards": [{ "label": "Minério Brilhante", "quantity": 500, "condition": "trilha gratuita", "tier": "free" }],
+      "lock": ["rewards", "rewardsStatus"]
+    }
+  ]
+}
