@@ -174,16 +174,26 @@ export class Engine {
     return buildWeeklyReport(events, this.ctx(now));
   }
 
+  /** Marca do relatório do período no modo da fila, se já foi gerado. */
+  reportMark(kind: 'monthly' | 'weekly', now = nowIso()): { generatedAt: string } | undefined {
+    const r = this.d.db.get<{ generated_at: string }>('SELECT generated_at FROM report_marks WHERE mode = ? AND key = ?', this.d.outbox.mode, this.reportKey(kind, now));
+    return r ? { generatedAt: r.generated_at } : undefined;
+  }
+
+  reportExpiry(now = nowIso()): string {
+    return addHours(now, this.d.cfg.delivery.reportTtlHours);
+  }
+
   /** Gera e enfileira o relatório se ainda não foi gerado neste período (por modo). */
   runReport(kind: 'monthly' | 'weekly', now = nowIso()): boolean {
     const key = this.reportKey(kind, now);
     const mode = this.d.outbox.mode;
-    if (this.d.db.get('SELECT 1 FROM report_marks WHERE mode = ? AND key = ?', mode, key)) return false;
+    if (this.reportMark(kind, now)) return false;
     const body = this.buildReport(kind, now);
     const snapshot = kind === 'monthly' ? this.monthSnapshot(now) : {};
     this.d.db.transaction(() => {
       this.d.db.run('INSERT INTO report_marks (mode, key, generated_at, snapshot_json) VALUES (?, ?, ?, ?)', mode, key, now, JSON.stringify(snapshot));
-      this.d.outbox.enqueue({ dedupKey: key, kind: `report_${kind}`, body, expiresAt: addHours(now, this.d.cfg.delivery.reportTtlHours) }, now);
+      this.d.outbox.enqueue({ dedupKey: key, kind: `report_${kind}`, body, expiresAt: this.reportExpiry(now) }, now);
     });
     this.d.log.info({ kind, key, mode }, 'relatório gerado');
     return true;
