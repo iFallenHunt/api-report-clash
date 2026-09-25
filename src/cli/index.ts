@@ -12,6 +12,7 @@ import { importFromFile } from './import.js';
 import { runCheck } from './check.js';
 import { formatTestSendResult, runTestSend, testSendExitCode } from './test-send.js';
 import { runPromote } from './promote.js';
+import { runReissue } from './reissue.js';
 
 const HELP = `Uso: npm run cli -- <comando> [opções]
 
@@ -33,6 +34,9 @@ const HELP = `Uso: npm run cli -- <comando> [opções]
   outbox:promote <id> --confirm
                                    promove explicitamente um item dry_run validado para a fila live
                                    (exige DRY_RUN=false; sem --confirm só mostra; nunca envia)
+  outbox:reissue <id> --confirm
+                                   reemite manualmente um item live sent como novo pending, após validação de relevância
+                                   (exige DRY_RUN=false; só clan_war_found; uma vez por item; sem --confirm só mostra; nunca envia)
   poll:once announcements|clan     executa uma coleta agora
   demo:seed                        grava eventos FICTÍCIOS no banco configurado (só desenvolvimento)
   check                            diagnóstico somente leitura: configuração e API real do clã
@@ -200,6 +204,16 @@ async function main(argv: string[]) {
         console.log(`\nItem dry_run #${args[0]} promovido para live (#${r.item.id}).\n`);
         console.log(`kind: ${r.item.kind}\ndedup: ${r.item.dedupKey}\nstatus: ${r.item.status}\nexpira: ${r.item.expiresAt}\n`);
         console.log('Nenhuma mensagem foi enviada.\nExecute `npm run cli -- outbox:run` para enviar.');
+      }
+      break;
+    }
+
+    case 'outbox:reissue': {
+      const client = cfg.coc.token && cfg.coc.clanTag ? new CocClient({ base: cfg.coc.base, token: cfg.coc.token }) : null;
+      const r = await runReissue(app.db, cfg, { id: Number(args[0]), confirm: flags.has('--confirm'), client });
+      if (!r.ok) {
+        console.error(`\nrecusado: ${r.reason}\nNada foi alterado.`);
+        process.exitCode = 2;
       }
       break;
     }
