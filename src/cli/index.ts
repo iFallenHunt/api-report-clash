@@ -13,6 +13,7 @@ import { runCheck } from './check.js';
 import { formatTestSendResult, runTestSend, testSendExitCode } from './test-send.js';
 import { runPromote } from './promote.js';
 import { runReissue } from './reissue.js';
+import { runReportRun } from './report-run.js';
 
 const HELP = `Uso: npm run cli -- <comando> [opções]
 
@@ -37,6 +38,10 @@ const HELP = `Uso: npm run cli -- <comando> [opções]
   outbox:reissue <id> --confirm
                                    reemite manualmente um item live sent como novo pending, após validação de relevância
                                    (exige DRY_RUN=false; só clan_war_found; uma vez por item; sem --confirm só mostra; nunca envia)
+  report:run weekly --confirm
+                                   gera manualmente o relatório semanal e o enfileira no modo live;
+                                   sem --confirm apenas mostra o preview; nunca envia diretamente
+                                   (exige DRY_RUN=false; uma vez por semana, mesma dedup do agendador)
   poll:once announcements|clan     executa uma coleta agora
   demo:seed                        grava eventos FICTÍCIOS no banco configurado (só desenvolvimento)
   check                            diagnóstico somente leitura: configuração e API real do clã
@@ -211,6 +216,15 @@ async function main(argv: string[]) {
     case 'outbox:reissue': {
       const client = cfg.coc.token && cfg.coc.clanTag ? new CocClient({ base: cfg.coc.base, token: cfg.coc.token }) : null;
       const r = await runReissue(app.db, cfg, { id: Number(args[0]), confirm: flags.has('--confirm'), client });
+      if (!r.ok) {
+        console.error(`\nrecusado: ${r.reason}\nNada foi alterado.`);
+        process.exitCode = 2;
+      }
+      break;
+    }
+
+    case 'report:run': {
+      const r = runReportRun(app, cfg, { kind: args[0], confirm: flags.has('--confirm'), now: now.toISOString() });
       if (!r.ok) {
         console.error(`\nrecusado: ${r.reason}\nNada foi alterado.`);
         process.exitCode = 2;
