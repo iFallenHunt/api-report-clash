@@ -31,6 +31,13 @@ function rewardsReviewNote(listed: ClashEvent[]): string | null {
   return pending ? '🎁 Recompensas marcadas como "não verificadas" ainda dependem de revisão manual; confira na fonte oficial.' : null;
 }
 
+/** Alerta de cobertura: só quando os anúncios oficiais não puderam ser verificados (o mensal não mostra o "verificado em"). */
+function coverageWarning(ctx: ReportContext): string | null {
+  if (ctx.announcementsUnavailable) return '⚠️ A fonte oficial de anúncios não pôde ser consultada na última verificação. Este relatório pode estar incompleto.';
+  if (!ctx.announcementsCheckedAt) return '⚠️ Nenhuma verificação de anúncios oficiais registrada ainda.';
+  return null;
+}
+
 function coverageNote(ctx: ReportContext): string[] {
   const lines: string[] = [];
   if (ctx.announcementsUnavailable) {
@@ -53,33 +60,31 @@ export function buildMonthlyReport(events: ClashEvent[], yearMonth: string, ctx:
   const st = (e: ClashEvent) => statusOf(e, ctx.now, ctx.tz);
 
   const live = events.filter((e) => st(e) !== 'cancelled');
-  const inMonthAll = live.filter((e) => within(e, from, to, ctx.tz)).sort(byStart);
+  // Evento do mês anterior que só termina no dia 1 (ex.: temporada até 01/10) não é do calendário do mês.
+  const dayOneEnd = monthStart.plus({ days: 1 }).toMillis();
+  const carriedOver = (e: ClashEvent) => {
+    const { start, end } = eventWindow(e, ctx.tz);
+    return start !== null && start < from && end !== null && end <= dayOneEnd;
+  };
+  const inMonthAll = live.filter((e) => within(e, from, to, ctx.tz) && !carriedOver(e)).sort(byStart);
   const main = inMonthAll.filter((e) => !isMinorCategory(e));
   const others = inMonthAll.filter((e) => e.category === 'other');
-  const cosmetics = inMonthAll.filter((e) => e.category === 'cosmetic');
   const undated = live.filter((e) => e.scope === 'global' && !e.startAt && st(e) !== 'ended');
   const cancelled = events.filter((e) => e.status === 'cancelled' && within(e, from, to, ctx.tz));
 
   const blocks: (string | string[] | null)[] = [];
   blocks.push(`📆 ${bold(`CALENDÁRIO DE ${formatMonthName(yearMonth, ctx.tz).toUpperCase()}`)}`);
-  const hasAny = main.length + others.length + cosmetics.length + undated.length + cancelled.length > 0;
+  const hasAny = main.length + others.length + undated.length + cancelled.length > 0;
   if (!hasAny) blocks.push('Nenhum evento com data confirmada para este mês até agora.');
   if (main.length) {
     blocks.push(bold('Eventos confirmados'));
     for (const ev of main) blocks.push(eventSummaryLine(ev, ctx.tz, { now: ctx.now }));
   }
   if (others.length) blocks.push([bold('🧩 Também no mês (ajustes, baús e ofertas)'), ...others.map((ev) => compactLine(ev, ctx.tz))]);
-  if (cosmetics.length) blocks.push([bold('🎨 Cosméticos e ofertas na loja'), ...cosmetics.map((ev) => compactLine(ev, ctx.tz))]);
   if (undated.length) blocks.push([bold('📣 Anunciados, ainda sem data confirmada'), ...undated.map((ev) => `• ${ev.title}`)]);
   if (cancelled.length) blocks.push([bold('❌ Cancelados'), ...cancelled.map((ev) => `• ~${ev.title}~`)]);
-  blocks.push(
-    [
-      '📌 Calendário parcial: a Supercell divulga eventos ao longo do mês. Novidades relevantes serão avisadas separadamente.',
-      rewardsReviewNote(main),
-      ...coverageNote(ctx),
-    ].filter((l): l is string => !!l),
-  );
-  blocks.push(sourcesBlock([...inMonthAll, ...undated]));
+  blocks.push(coverageWarning(ctx));
+  blocks.push(sourcesBlock([...main, ...others, ...undated]));
   blocks.push(FOOTER_TZ);
   return joinBlocks(blocks);
 }

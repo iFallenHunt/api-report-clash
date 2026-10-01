@@ -56,8 +56,32 @@ describe('relatórios', () => {
     expect(txt).toContain('Recompensas não verificadas');
     expect(txt).toContain('Recompensas ainda não divulgadas');
     expect(txt).toContain('~Cancelado~');
-    expect(txt).toContain('Calendário parcial');
+    expect(txt).not.toContain('Calendário parcial');
     expect(txt).toContain('não pôde ser consultada');
+  });
+
+  it('mensal: sem cosméticos e sem notas de rodapé quando os anúncios foram verificados', () => {
+    const h = seeded();
+    h.repo.applyEvent(globalEvent({ title: 'Paisagem de outubro', category: 'cosmetic', startAt: '2026-10-03', startPrecision: 'date', endAt: '2026-10-31', endPrecision: 'date' }), { origin: 'manual', now: NOW });
+    const txt = buildMonthlyReport(h.repo.allEvents(), '2026-10', { tz: TZ, now: new Date(NOW), announcementsCheckedAt: '2026-09-24T10:00:00Z', announcementsUnavailable: false });
+    expect(txt).not.toContain('Cosméticos e ofertas na loja');
+    expect(txt).not.toContain('Paisagem de outubro');
+    expect(txt).not.toContain('Calendário parcial');
+    expect(txt).not.toContain('ainda dependem de revisão manual');
+    expect(txt).not.toContain('Anúncios oficiais verificados');
+    expect(txt).not.toContain('⚠️ A fonte oficial');
+    expect(txt).toContain('🕒 Horário de Brasília');
+  });
+
+  it('mensal: evento do mês anterior que termina no dia 1 fica de fora; o que começa no dia 1 entra', () => {
+    const h = seeded();
+    h.repo.applyEvent(globalEvent({ title: 'Temporada de setembro', category: 'season', startAt: '2026-09-01', startPrecision: 'date', endAt: '2026-10-01', endPrecision: 'date' }), { origin: 'manual', now: NOW });
+    h.repo.applyEvent(globalEvent({ title: 'Atravessa outubro', category: 'challenge', startAt: '2026-09-28', startPrecision: 'date', endAt: '2026-10-02', endPrecision: 'date' }), { origin: 'manual', now: NOW });
+    h.repo.applyEvent(globalEvent({ title: 'Temporada de outubro', category: 'season', startAt: '2026-10-01', startPrecision: 'date', endAt: '2026-10-25', endPrecision: 'date' }), { origin: 'manual', now: NOW });
+    const txt = buildMonthlyReport(h.repo.allEvents(), '2026-10', { tz: TZ, now: new Date('2026-10-01T12:00:00Z'), announcementsCheckedAt: '2026-10-01T11:00:00Z', announcementsUnavailable: false });
+    expect(txt).not.toContain('Temporada de setembro');
+    expect(txt).toContain('Atravessa outubro');
+    expect(txt).toContain('Temporada de outubro');
   });
 
   it('aviso individual segue a estrutura pedida', () => {
