@@ -138,6 +138,44 @@ As credenciais ficam só no arquivo `.env` na raiz do projeto (já criado a part
 2. Defina `DRY_RUN=false`, `WHATSAPP_GROUP_ID` e `WHATSAPP_EXPECTED_GROUP_NAME` no `.env`; `docker compose up -d`.
 3. A fila do modo `dry_run` **não** é enviada ao mudar de modo: o modo real começa vazio e só recebe o que for atual e elegível a partir daí (relatório do período ainda não gerado no modo real, avisos de eventos dentro da validade). Nada antigo é despejado no grupo.
 
+### Produção em VM pequena (ex.: Oracle E2.1.Micro, 1 GB + swap)
+
+Atualizar (o build leva ~15 min numa VM de 1 GB; o serviço continua no ar até o `up -d`):
+
+```bash
+cd ~/api-report-clash
+git fetch origin && git status          # working tree limpa, em main
+docker compose exec -T bot node dist/cli/index.js outbox:list pending   # nada em envio
+git pull --ff-only
+docker compose build
+docker compose up -d                    # para com até 90 s (stop_grace_period) e sobe a nova imagem
+docker compose ps
+curl -fsS http://127.0.0.1:8080/health  # "whatsapp":"ready" em ~2-5 min
+```
+
+Nunca em produção: `git reset --hard`, `docker volume rm`, `docker compose down -v` (apaga banco e sessão), editar `outbox`/`report_marks`/`clan_state` à mão.
+
+- `.env` da VM: `WA_ACK_TIMEOUT_SECONDS=60`, `SEND_LEASE_SECONDS=120`, `WA_AUTH_TIMEOUT_SECONDS=180`. Porta 8080 só em `127.0.0.1`.
+- Comandos `wa:*` em `docker compose run` abrem a mesma sessão do serviço: rode-os só com o serviço parado (`docker compose stop -t 90 bot`).
+- `docker run --env-file .env` não remove aspas (`CLAN_TAG="#…"` vira tag inválida, HTTP 404); use `docker compose run`, que remove.
+- **Pareamento do WhatsApp**: numa VM de 1 GB o pareamento por QR costuma cair (`LOGOUT` logo após escanear). Pareie numa máquina mais forte com a **mesma imagem** e copie a sessão para o volume `wa-session` (com o serviço parado):
+  ```bash
+  # na máquina local (imagem copiada da VM: ssh vm 'docker save api-report-clash:local' | docker load)
+  docker run --rm -it --shm-size=512m -v clash-pair-wa:/app/wa-session -e DRY_RUN=true -e DB_PATH=/tmp/pair.sqlite \
+    -e WA_SESSION_PATH=/app/wa-session -e WA_CLIENT_ID=clash-report-bot api-report-clash:local node dist/cli/index.js wa:auth
+  docker run --rm -v clash-pair-wa:/s:ro --entrypoint sh api-report-clash:local -c 'tar -C /s -cf - . | gzip -1' \
+    | ssh vm 'docker run --rm -i -u root -v api-report-clash_wa-session:/d --entrypoint sh api-report-clash:local \
+        -c "find /d -mindepth 1 -delete && gunzip | tar -C /d -xf - && chown -R node:node /d"'
+  ```
+  Depois apague o volume local (`docker volume rm clash-pair-wa`): a mesma sessão nunca deve rodar em dois lugares.
+- **Loop de reinício com "The profile appears to be in use by another Chromium process"**: lock do Chromium deixado por um encerramento forçado (OOM, `kill`). Com o serviço parado e nenhum Chromium rodando, remova só os locks:
+  ```bash
+  docker compose stop -t 90 bot
+  docker compose run --rm --no-deps --entrypoint sh bot -c \
+    'find /app/wa-session -maxdepth 3 \( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie \) -exec rm -f {} +'
+  docker compose up -d
+  ```
+
 ## Comandos da CLI
 
 ```
