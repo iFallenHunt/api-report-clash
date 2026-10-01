@@ -83,7 +83,7 @@ export function warEnding(w: WarSnapshot, tz: string, now = new Date()): string 
   return joinBlocks([
     `⏰ ${bold(`${label(w).toUpperCase()} TERMINA EM ${left ?? 'BREVE'}`)}`,
     [
-      c && o ? `⭐ Placar: ${c.stars} x ${o.stars} (${c.destructionPercentage.toFixed(1)}% x ${o.destructionPercentage.toFixed(1)}%)` : null,
+      c && o ? `⭐ Placar: ${c.stars} x ${o.stars} (${pct(c.destructionPercentage)} x ${pct(o.destructionPercentage)})` : null,
       c && w.teamSize && w.attacksPerMember ? `🎯 Ataques usados: ${c.attacks}/${w.teamSize * w.attacksPerMember}` : null,
       w.endTime ? `🏁 Término: ${formatWhen(w.endTime, 'datetime', tz)}` : null,
       'Quem ainda não atacou, ataque agora!',
@@ -105,11 +105,16 @@ export function warEnded(w: WarSnapshot, tz: string): string {
     `🏁 ${bold(`${label(w).toUpperCase()} ENCERRADA: ${result}`)}`,
     [
       c && o ? `⭐ ${c.name} ${c.stars} x ${o.stars} ${o.name}` : null,
-      c && o ? `💥 Destruição: ${c.destructionPercentage.toFixed(1)}% x ${o.destructionPercentage.toFixed(1)}%` : null,
+      c && o ? `💥 Destruição: ${pct(c.destructionPercentage)} x ${pct(o.destructionPercentage)}` : null,
       w.endTime ? `🕒 Encerrada em: ${formatWhen(w.endTime, 'datetime', tz)}` : null,
     ].filter(Boolean) as string[],
     FOOTER_TZ,
   ]);
+}
+
+/** Porcentagem em pt-BR com arredondamento "humano" (17,45 → 17,5%). */
+export function pct(n: number): string {
+  return `${(Math.round((n + Number.EPSILON) * 10) / 10).toFixed(1).replace('.', ',')}%`;
 }
 
 export interface CwlGroupSnapshot {
@@ -122,9 +127,12 @@ export interface CwlGroupSnapshot {
 }
 
 export function cwlGroupFound(g: CwlGroupSnapshot): string {
+  const month = DateTime.fromISO(`${g.season.slice(0, 7)}-01`).setLocale('pt-BR');
+  const label = month.isValid ? `DE ${month.toFormat('LLLL').toUpperCase()}` : g.season;
+  const clans = g.clanDetails?.length ? [...g.clanDetails].sort((a, b) => (b.level ?? 0) - (a.level ?? 0)).map((c) => `${c.name}${c.level ? ` (nv. ${c.level})` : ''}`) : g.clans;
   return joinBlocks([
-    `🏆 ${bold(`LIGA DE GUERRA ${g.season}: GRUPO DEFINIDO`)}`,
-    [`Rodadas: ${g.rounds}`, `Clãs no grupo: ${g.clans.join(', ')}`],
+    `🏆 ${bold(`LIGA DE GUERRA ${label}: GRUPO DEFINIDO`)}`,
+    [`Rodadas: ${g.rounds}`, `Clãs no grupo (${clans.length}): ${clans.join(', ')}`],
     'Cada rodada tem 1 dia de preparação e 1 dia de batalha, com 1 ataque por membro.',
     FOOTER_TZ,
   ]);

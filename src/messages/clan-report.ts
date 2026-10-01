@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import { displayDateTime, formatWhen } from '../domain/dates.js';
 import type { ClashEvent } from '../domain/types.js';
-import type { ClanInfoSnapshot, CwlGroupSnapshot, RaidSnapshot, WarLogEntry, WarSnapshot } from './clan.js';
+import { pct, type ClanInfoSnapshot, type CwlGroupSnapshot, type RaidSnapshot, type WarLogEntry, type WarSnapshot } from './clan.js';
 import { bold } from './format.js';
 
 /** Estado do clã vindo da API oficial (clan_state), para a seção "Nosso clã" dos relatórios. */
@@ -45,10 +45,6 @@ function num(n: number): string {
   return n.toLocaleString('pt-BR');
 }
 
-function pct(n: number): string {
-  // arredondamento "humano" (17,45 → 17,5), não o do ponto flutuante
-  return `${(Math.round((n + Number.EPSILON) * 10) / 10).toFixed(1).replace('.', ',')}%`;
-}
 
 function day(iso: string, tz: string): string {
   return displayDateTime(iso, 'datetime', tz).toFormat('dd/LL');

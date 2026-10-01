@@ -11,7 +11,7 @@ export interface RunnerDeps {
   engine: Engine;
   outbox: Outbox;
   sender: Sender;
-  pollAnnouncements: () => Promise<unknown>;
+  pollAnnouncements: () => Promise<readonly { ok: boolean }[]>;
   pollClan: (() => Promise<unknown>) | null;
 }
 
@@ -35,6 +35,8 @@ function guarded(name: string, log: Logger, fn: () => unknown) {
   };
 }
 
+const ANNOUNCEMENTS_RETRY_MINUTES = 5;
+
 /** Agenda os jobs: relatórios (cron com fuso), tick por minuto, coletas por intervalo e worker de envio. */
 export function startRunner(d: RunnerDeps): RunnerHandle {
   const tz = d.cfg.tzDisplay;
@@ -52,7 +54,19 @@ export function startRunner(d: RunnerDeps): RunnerHandle {
   // atualização do calendário mensal: verificada uma vez por dia às 12h (só envia se algo mudou)
   jobs.push(new Cron('0 12 * * *', { timezone: tz, protect: true }, guarded('monthly_update', d.log, () => { d.engine.runMonthlyUpdate(); stamp('monthly_update')(); })));
 
-  const ann = guarded('announcements', d.log, async () => { await d.pollAnnouncements(); stamp('announcements')(); });
+  // Falha na coleta de anúncios (ex.: timeout com a VM ocupada subindo o Chromium) tenta de novo em poucos
+  // minutos, sem esperar o intervalo normal: relatório não deve sair com "fonte não consultada" por 1 h.
+  let annRetry: NodeJS.Timeout | null = null;
+  const ann = guarded('announcements', d.log, async () => {
+    const results = await d.pollAnnouncements();
+    stamp('announcements')();
+    if (annRetry) clearTimeout(annRetry);
+    annRetry = null;
+    if (results.some((r) => !r.ok)) {
+      d.log.warn({ retryMinutes: ANNOUNCEMENTS_RETRY_MINUTES }, 'coleta de anúncios falhou; nova tentativa em breve');
+      annRetry = setTimeout(() => void ann(), ANNOUNCEMENTS_RETRY_MINUTES * 60_000);
+    }
+  });
   timers.push(setInterval(ann, d.cfg.schedule.pollAnnouncementsMinutes * 60_000));
   setTimeout(ann, 5_000);
 
@@ -74,6 +88,7 @@ export function startRunner(d: RunnerDeps): RunnerHandle {
     stop() {
       for (const j of jobs) j.stop();
       for (const t of timers) clearInterval(t);
+      if (annRetry) clearTimeout(annRetry);
     },
     status() {
       return { lastRuns: last, nextMonthly: jobs[0]?.nextRun()?.toISOString(), nextWeekly: jobs[1]?.nextRun()?.toISOString() };
