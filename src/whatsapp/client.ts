@@ -64,6 +64,12 @@ export class WhatsAppSender implements Sender {
       puppeteer: {
         headless: true,
         ...(this.cfg.wa.executablePath ? { executablePath: this.cfg.wa.executablePath } : {}),
+        // Sinais ficam com o nosso shutdown (stop → destroy → browser.close). Com o padrão do Puppeteer, o
+        // SIGTERM do `docker stop` mata o Chromium na hora e os locks Singleton* do perfil ficam para trás,
+        // impedindo a próxima subida do serviço.
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
       },
     });
