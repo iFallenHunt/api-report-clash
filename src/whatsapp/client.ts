@@ -60,6 +60,7 @@ export class WhatsAppSender implements Sender {
     const qrcode = (await import('qrcode-terminal')).default;
     this.client = new Client({
       authStrategy: new LocalAuth({ clientId: this.cfg.wa.clientId, dataPath: this.cfg.wa.sessionPath }),
+      authTimeoutMs: this.cfg.wa.authTimeoutSeconds * 1000,
       puppeteer: {
         headless: true,
         ...(this.cfg.wa.executablePath ? { executablePath: this.cfg.wa.executablePath } : {}),

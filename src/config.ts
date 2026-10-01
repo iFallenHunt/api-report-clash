@@ -50,6 +50,9 @@ const envSchema = z.object({
   PUPPETEER_EXECUTABLE_PATH: optStr,
   // Prazo para o WhatsApp confirmar cada envio (ACK do servidor). Sem confirmação, o item fica "uncertain".
   WA_ACK_TIMEOUT_SECONDS: int(DEFAULT_ACK_TIMEOUT_SECONDS, 5),
+  // Prazo para o WhatsApp Web carregar após abrir/recarregar a página (authTimeoutMs do whatsapp-web.js).
+  // Máquinas lentas (ex.: VM de 1 GB) precisam de mais que o padrão de 30 s, senão o login cai em "auth timeout".
+  WA_AUTH_TIMEOUT_SECONDS: int(30, 5),
 
   // Fontes de anúncios
   SOURCE_BLOG_ENABLED: bool.transform((v) => v ?? true),
@@ -89,7 +92,7 @@ export interface AppConfig {
   dbPath: string;
   previewDir: string;
   coc: { token?: string; base: string; clanTag?: string };
-  wa: { groupId?: string; expectedGroupName?: string; sessionPath: string; clientId: string; executablePath?: string; ackTimeoutSeconds: number };
+  wa: { groupId?: string; expectedGroupName?: string; sessionPath: string; clientId: string; executablePath?: string; ackTimeoutSeconds: number; authTimeoutSeconds: number };
   sources: { blog: boolean; inbox: boolean; locale: string };
   schedule: {
     monthlyCron: string;
@@ -136,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       clientId: e.WA_CLIENT_ID,
       executablePath: e.PUPPETEER_EXECUTABLE_PATH,
       ackTimeoutSeconds: e.WA_ACK_TIMEOUT_SECONDS,
+      authTimeoutSeconds: e.WA_AUTH_TIMEOUT_SECONDS,
     },
     sources: { blog: e.SOURCE_BLOG_ENABLED, inbox: e.SOURCE_INBOX_ENABLED, locale: e.SOURCE_LOCALE },
     schedule: {
