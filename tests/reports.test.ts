@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildMonthlyReport, buildWeeklyReport } from '../src/messages/reports.js';
+import { leagueName, type ClanReport } from '../src/messages/clan-report.js';
 import { noticeStarted } from '../src/messages/notices.js';
 import { globalEvent, harness, NOW } from './helpers.js';
 
@@ -97,5 +98,73 @@ describe('relatórios', () => {
     expect(txt).toContain('💳 *Passe/conteúdo pago:*');
     expect(txt).toContain('🔗 Fonte: https://supercell.com/');
     expect(txt.trim().endsWith('🕒 Horário de Brasília')).toBe(true);
+  });
+
+  function clan(over: Partial<ClanReport> = {}): ClanReport {
+    const round = (n: number, state: 'preparation' | 'inWar' | 'warEnded', opp: string, oppTag: string, start: string, end: string, stars: [number, number] = [0, 0]) => ({
+      key: `2026-10:#W${n}`, state, teamSize: 15, attacksPerMember: 1, preparationStartTime: null, startTime: start, endTime: end, cwlRound: n, cwlSeason: '2026-10',
+      clan: { name: 'Clãdestino', tag: '#2GG', stars: stars[0], destructionPercentage: stars[0] * 3, attacks: 15 },
+      opponent: { name: opp, tag: oppTag, stars: stars[1], destructionPercentage: stars[1] * 3, attacks: 15 },
+    });
+    return {
+      info: { name: 'Clãdestino', tag: '#2GG', level: 15, members: 18, warLeague: 'Gold League II', capitalLeague: 'Silver League III', capitalHallLevel: 9, warWins: 66, warLosses: 118, warTies: 0, warWinStreak: 1, isWarLogPublic: true },
+      updatedAt: '2026-10-01T11:55:00Z',
+      currentWar: null,
+      warLog: [{ result: 'win', endTime: '2026-09-30T12:19:11Z', teamSize: 20, opponent: { name: 'TEAM ACE VN', tag: '#2PV', stars: 10, destructionPercentage: 17.45 }, clan: { stars: 31, destructionPercentage: 56.25, attacks: 14 } }],
+      cwl: {
+        group: { season: '2026-10', state: 'inWar', rounds: 7, clans: ['Clãdestino', 'PINOY', 'Purple Sage'], clanDetails: [{ name: 'Clãdestino', tag: '#2GG', level: 15, members: 15 }, { name: 'PINOY', tag: '#PIN', level: 6, members: 18 }, { name: 'Purple Sage', tag: '#PUR', level: 20, members: 15 }] },
+        rounds: [round(2, 'preparation', 'Purple Sage', '#PUR', '2026-10-03T17:19:35Z', '2026-10-04T17:19:35Z'), round(1, 'warEnded', 'PINOY', '#PIN', '2026-10-02T17:19:35Z', '2026-10-03T17:19:35Z', [30, 25])],
+      },
+      raid: { key: '2026-09-25T07:00:00Z', state: 'ended', startTime: '2026-09-25T07:00:00Z', endTime: '2026-09-28T07:00:00Z', capitalTotalLoot: 152610, raidsCompleted: 2, totalAttacks: 60, enemyDistrictsDestroyed: 16, offensiveReward: 119, defensiveReward: 148 },
+      ...over,
+    };
+  }
+
+  it('nomes de liga da API em português', () => {
+    expect(leagueName('Gold League II')).toBe('Ouro II');
+    expect(leagueName('Crystal League I')).toBe('Cristal I');
+    expect(leagueName('Champion League III')).toBe('Campeão III');
+    expect(leagueName('Unranked')).toBe('sem liga');
+    expect(leagueName('Legend League')).toBe('Lenda');
+  });
+
+  it('mensal com dados da API: seção do clã com liga, rodadas com horário real, histórico e raides; Liga genérica do blog vira só o período', () => {
+    const h = seeded();
+    h.repo.applyEvent(globalEvent({ title: 'Liga das Guerras de Clãs', category: 'cwl', startAt: '2026-10-01', startPrecision: 'date', endAt: '2026-10-11', endPrecision: 'date' }), { origin: 'manual', now: NOW });
+    h.repo.applyEvent({ id: 'clan_cwl_x', category: 'cwl', scope: 'clan', title: 'Liga de Guerra 2026-10 · rodada 1 vs PINOY', startAt: '2026-10-02T17:19:35Z', startPrecision: 'datetime', endAt: '2026-10-03T17:19:35Z', endPrecision: 'datetime', rewardsStatus: 'not_announced' }, { origin: 'clan', now: NOW });
+    const now = new Date('2026-10-01T12:00:00Z');
+    const txt = buildMonthlyReport(h.repo.allEvents(), '2026-10', { tz: TZ, now, announcementsCheckedAt: '2026-10-01T11:00:00Z', announcementsUnavailable: false, clan: clan() });
+    expect(txt).toContain('*NOSSO CLÃ* · Clãdestino');
+    expect(txt).toContain('• Nível 15 · 18 membros');
+    expect(txt).toContain('🏆 Liga de Guerra: Ouro II · 🏰 Capital: Prata III (Centro da Capital nível 9)');
+    expect(txt).toContain('📊 Guerras: 66 vitórias · 118 derrotas · 0 empates · sequência atual: 1 vitória');
+    expect(txt).toContain('*LIGA DE GUERRA DE OUTUBRO*');
+    expect(txt).toContain('• Período: 01/10 a 11/10 (segundo a Supercell)');
+    expect(txt).toContain('• Grupo com 3 clãs: Purple Sage (nv. 20), Clãdestino (nv. 15), PINOY (nv. 6)');
+    // rodadas em ordem, encerrada com placar, próxima com horários reais
+    expect(txt.indexOf('Rodada 1 · vs PINOY (nv. 6) · 15x15 · ✅ Vitória 30⭐ x 25⭐ (90,0% x 75,0%)')).toBeGreaterThan(0);
+    expect(txt).toContain('• Rodada 2 · vs Purple Sage (nv. 20) · 15x15');
+    expect(txt).toContain('⏳ Preparação até sáb., 03 de out. às 14:19');
+    expect(txt).toContain('• ⭐ Até agora: 1 vitória em 1 rodada, 30 estrelas');
+    expect(txt).toContain('• Rodadas 3 a 7: adversário e horário saem quando a rodada começar');
+    expect(txt).toContain('✅ Vitória vs TEAM ACE VN (30/09) · 31⭐ x 10⭐ (56,3% x 17,5%)');
+    expect(txt).toContain('152.610 de ouro da capital · 60 ataques · 2 raides concluídas · 16 distritos destruídos');
+    // sem duplicar: nem o item genérico da Liga nem o evento do clã aparecem em "Eventos confirmados"
+    const events = txt.slice(txt.indexOf('Eventos confirmados'));
+    expect(events).not.toContain('Liga das Guerras de Clãs');
+    expect(events).not.toContain('rodada 1 vs PINOY');
+    expect(txt).not.toContain('Dados do clã de');
+  });
+
+  it('dados do clã velhos aparecem com alerta; sem dados da API o relatório fica como antes', () => {
+    const h = seeded();
+    const now = new Date('2026-10-01T12:00:00Z');
+    const stale = buildWeeklyReport(h.repo.allEvents(), { tz: TZ, now, announcementsCheckedAt: null, announcementsUnavailable: false, clan: clan({ updatedAt: '2026-10-01T09:00:00Z' }) });
+    expect(stale).toContain('⚠️ Dados do clã de qui., 01 de out. às 06:00: a API do Clash não respondeu desde então.');
+    expect(stale).toContain('*LIGA DE GUERRA DE OUTUBRO*');
+    expect(stale).not.toContain('Período:'); // a Liga de setembro do blog não serve de período para a de outubro
+    const without = buildWeeklyReport(h.repo.allEvents(), { tz: TZ, now: new Date(NOW), announcementsCheckedAt: null, announcementsUnavailable: false });
+    expect(without).not.toContain('NOSSO CLÃ');
+    expect(without).toContain('Guerra de clãs vs Exemplo');
   });
 });

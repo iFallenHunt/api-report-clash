@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { declaredDurationText, displayDateTime, displayStatus, durationText, formatWhen, humanDuration, PHASE_NOTE } from '../domain/dates.js';
-import { rewardsLines } from '../domain/rewards.js';
+import { rewardQuoteLines, rewardQuotes, rewardsLines } from '../domain/rewards.js';
 import { CATEGORY_LABEL, REWARD_CATEGORIES, type ClashEvent } from '../domain/types.js';
 
 export const FOOTER_TZ = '🕒 Horário de Brasília';
@@ -54,7 +54,7 @@ export function eventBlock(ev: ClashEvent, tz: string, opts: { rewards?: boolean
   lines.push(...whenLines(ev, tz, opts.now));
   if (opts.rewards !== false && ev.scope === 'global') {
     lines.push('');
-    lines.push(...rewardsLines(ev.rewardsStatus, ev.rewards, ev.primarySourceUrl));
+    lines.push(...rewardsLines(ev.rewardsStatus, ev.rewards, ev.primarySourceUrl, ev.description));
   }
   const src = sourceLine(ev);
   if (src) {
@@ -99,8 +99,11 @@ export function eventSummaryLine(ev: ClashEvent, tz: string, opts: { link?: bool
   if (dur) out.push(`   ⏳ ${dur}`);
   const note = opts.now ? PHASE_NOTE[displayStatus(ev, opts.now, tz)] : undefined;
   if (note) out.push(`   ⚠️ ${note}`);
-  // Linha de prêmios só para categorias com recompensas a conquistar (temporada, medalhas, desafios, Jogos do Clã).
-  if (ev.scope === 'global' && REWARD_CATEGORIES.has(ev.category)) out.push(`   ${rewardsSummary(ev)}`);
+  // Prêmios: lista estruturada quando há; senão, os trechos literais da fonte sobre recompensas;
+  // senão, a linha de status (só para categorias com recompensas a conquistar).
+  const quotes = ev.scope === 'global' && !hasKnownPrizes(ev) ? rewardQuotes(ev.description) : [];
+  if (quotes.length) out.push(...rewardQuoteLines(quotes, '   '));
+  else if (ev.scope === 'global' && REWARD_CATEGORIES.has(ev.category)) out.push(`   ${rewardsSummary(ev)}`);
   if (opts.link && ev.primarySourceUrl) out.push(`   🔗 ${ev.primarySourceUrl}`);
   return out;
 }
@@ -133,6 +136,16 @@ export function rewardsSummary(ev: Pick<ClashEvent, 'rewardsStatus' | 'rewards'>
   }
   if (ev.rewardsStatus === 'known' && shop.length) parts.push(`🛒 loja com ${shop.length} itens`);
   return parts.join(' · ');
+}
+
+function hasKnownPrizes(ev: Pick<ClashEvent, 'rewardsStatus' | 'rewards'>): boolean {
+  return ev.rewardsStatus === 'known' && ev.rewards.some((r) => r.kind !== 'shop');
+}
+
+/** Linha compacta + trechos da fonte sobre recompensas (ex.: visual do Bilhete dourado). */
+export function compactLines(ev: ClashEvent, tz: string): string[] {
+  const quotes = ev.scope === 'global' && !hasKnownPrizes(ev) ? rewardQuotes(ev.description) : [];
+  return [compactLine(ev, tz), ...rewardQuoteLines(quotes, '   ')];
 }
 
 /** Linha compacta para cosméticos/ofertas: "• Nome (dd/LL a dd/LL)". */

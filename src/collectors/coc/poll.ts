@@ -3,10 +3,10 @@ import type { AppConfig } from '../../config.js';
 import type { Db } from '../../db/index.js';
 import { addHours, nowIso } from '../../domain/dates.js';
 import type { Logger } from '../../logger.js';
-import { cwlGroupFound, raidEnded, raidEnding, raidStarted, warEnded, warEnding, warFound, warStarted, type CwlGroupSnapshot, type RaidSnapshot, type WarSnapshot } from '../../messages/clan.js';
+import { cwlGroupFound, raidEnded, raidEnding, raidStarted, warEnded, warEnding, warFound, warStarted, type ClanInfoSnapshot, type CwlGroupSnapshot, type RaidSnapshot, type WarLogEntry, type WarSnapshot } from '../../messages/clan.js';
 import type { Outbox } from '../../outbox/queue.js';
 import { recordRunEnd, recordRunStart } from '../announcements/index.js';
-import { CocApiError, CocUnavailableError, parseCocTime, type CocClient, type RawLeagueGroup, type RawWar, type RawWarClan } from './client.js';
+import { CocApiError, CocUnavailableError, parseCocTime, type CocClient, type RawClan, type RawLeagueGroup, type RawWar, type RawWarClan, type RawWarLogEntry } from './client.js';
 
 export interface ClanPollerDeps {
   client: CocClient;
@@ -88,6 +88,21 @@ export class ClanPoller {
       result.raid = cur.state;
       this.handleRaid(cur, now);
     });
+    let warLogPublic: boolean | null = null;
+    await this.step('info', result, now, async () => {
+      const info = this.snapshotInfo(await this.d.client.clan(this.d.clanTag));
+      warLogPublic = info.isWarLogPublic;
+      this.setState('clan_info', info.tag, 'ok', info, now);
+    });
+    // War log privado responde 403: nesse caso não há histórico a consultar (não é falha da coleta).
+    if (warLogPublic !== false) {
+      await this.step('warlog', result, now, async () => {
+        const log = await this.d.client.warLog(this.d.clanTag, 5);
+        const entries = (log.items ?? []).map((e) => this.warLogEntry(e)).filter((e): e is WarLogEntry => e !== null);
+        this.setState('warlog', this.normTag(this.d.clanTag), 'ok', entries, now);
+        this.closeFinishedWars(entries, now);
+      });
+    }
     recordRunEnd(this.d.db, runId, result.ok, result.errors.join('; ') || null, 0, nowIso());
     return result;
   }
@@ -189,10 +204,75 @@ export class ClanPoller {
     }
   }
 
+  // ---------- dados do clã e war log ----------
+
+  snapshotInfo(c: RawClan): ClanInfoSnapshot {
+    return {
+      name: c.name,
+      tag: this.normTag(c.tag),
+      level: c.clanLevel ?? null,
+      members: c.members ?? null,
+      warLeague: c.warLeague?.name ?? null,
+      capitalLeague: c.capitalLeague?.name ?? null,
+      capitalHallLevel: c.clanCapital?.capitalHallLevel ?? null,
+      warWins: c.warWins ?? null,
+      warLosses: c.warLosses ?? null,
+      warTies: c.warTies ?? null,
+      warWinStreak: c.warWinStreak ?? null,
+      isWarLogPublic: c.isWarLogPublic ?? null,
+    };
+  }
+
+  /** Só guerras comuns (as da Liga de Guerra vêm sem adversário nem resultado no war log). */
+  warLogEntry(e: RawWarLogEntry): WarLogEntry | null {
+    const endTime = parseCocTime(e.endTime);
+    if (!e.result || !endTime || !e.opponent?.name) return null;
+    return {
+      result: e.result,
+      endTime,
+      teamSize: e.teamSize ?? null,
+      opponent: { name: e.opponent.name, tag: this.normTag(e.opponent.tag), stars: e.opponent.stars ?? 0, destructionPercentage: e.opponent.destructionPercentage ?? 0 },
+      clan: { stars: e.clan?.stars ?? 0, destructionPercentage: e.clan?.destructionPercentage ?? 0, attacks: e.clan?.attacks ?? null },
+    };
+  }
+
+  /**
+   * Guerra comum que acabou sem o bot ver o estado final (serviço parado): fecha com o placar oficial
+   * do war log. Aviso de encerramento só se ainda for recente, como no fluxo normal.
+   */
+  closeFinishedWars(entries: WarLogEntry[], now: string) {
+    const open = this.d.db.all<{ key: string; snapshot_json: string }>("SELECT key, snapshot_json FROM clan_state WHERE kind = 'war' AND state != 'warEnded'");
+    const nowMs = new Date(now).getTime();
+    for (const row of open) {
+      const snap = JSON.parse(row.snapshot_json) as WarSnapshot;
+      if (!snap.endTime || new Date(snap.endTime).getTime() > nowMs) continue;
+      const endMs = new Date(snap.endTime).getTime();
+      const entry = entries.find((e) => Math.abs(new Date(e.endTime).getTime() - endMs) <= 10 * 60_000 && (!snap.opponent || e.opponent.tag === snap.opponent.tag));
+      if (!entry) continue;
+      const ended: WarSnapshot = {
+        ...snap,
+        state: 'warEnded',
+        result: entry.result,
+        clan: snap.clan ? { ...snap.clan, stars: entry.clan.stars, destructionPercentage: entry.clan.destructionPercentage, attacks: entry.clan.attacks ?? snap.clan.attacks } : null,
+        opponent: { name: entry.opponent.name, tag: entry.opponent.tag, stars: entry.opponent.stars, destructionPercentage: entry.opponent.destructionPercentage, attacks: snap.opponent?.attacks ?? 0 },
+      };
+      if (this.recent(snap.endTime, now)) {
+        this.d.outbox.enqueue({ dedupKey: `clan:war:${row.key}:warEnded`, kind: 'clan_war_ended', body: warEnded(ended, this.tz), expiresAt: addHours(now, this.ttl) }, now);
+      }
+      this.setState('war', row.key, 'warEnded', ended, now);
+    }
+  }
+
   // ---------- liga ----------
 
   handleCwlGroup(group: RawLeagueGroup, now = nowIso()) {
-    const snap: CwlGroupSnapshot = { season: group.season, state: group.state, rounds: (group.rounds ?? []).length, clans: (group.clans ?? []).map((c) => c.name) };
+    const snap: CwlGroupSnapshot = {
+      season: group.season,
+      state: group.state,
+      rounds: (group.rounds ?? []).length,
+      clans: (group.clans ?? []).map((c) => c.name),
+      clanDetails: (group.clans ?? []).map((c) => ({ name: c.name, tag: this.normTag(c.tag), level: c.clanLevel ?? null, members: Array.isArray(c.members) ? c.members.length : null })),
+    };
     const prev = this.getState('cwl_group', group.season);
     if (!prev) {
       this.d.outbox.enqueue({ dedupKey: `clan:cwl:${group.season}:group`, kind: 'clan_cwl_group', body: cwlGroupFound(snap), expiresAt: addHours(now, this.ttl) }, now);

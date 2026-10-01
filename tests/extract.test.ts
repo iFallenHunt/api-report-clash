@@ -7,7 +7,7 @@ import { htmlToBlocks } from '../src/collectors/announcements/html.js';
 import { InboxSource } from '../src/collectors/announcements/inbox.js';
 import { ingestPublication, runAnnouncementSource } from '../src/collectors/announcements/index.js';
 import { SourceUnavailableError, type Publication } from '../src/collectors/announcements/types.js';
-import { harness, NOW } from './helpers.js';
+import { globalEvent, harness, NOW } from './helpers.js';
 
 const fx = (name: string) => readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8');
 const PUB = '2026-09-09T09:48:44Z';
@@ -132,6 +132,27 @@ describe('ingestão e falha de fonte', () => {
     const r2 = ingestPublication(p, h.repo, h.engine, h.log, '2026-09-24T13:00:00Z');
     expect(r2).toEqual({ created: 0, updated: 0, changed: false });
     expect(h.repo.allEvents()).toHaveLength(4);
+  });
+
+  it('"7 e 8 de outubro: …" vira evento de dois dias; descrição cortada antes é completada sem aviso', () => {
+    const h = harness();
+    const long = `Nele, 50 Lançadores de Totem aparecem para dar uma mãozinha sem custo. ${'Texto longo da fonte. '.repeat(25)}Resgate as suas recompensas até 1º de novembro!`;
+    const p = pub({ title: 'Temporada Teste', blocks: [
+      { type: 'paragraph', text: `7 e 8 de outubro: evento de tropas em massa do Lançador de Totem. ${long}` },
+      { type: 'paragraph', text: 'De 5 a 11 de outubro: Jogos do Clã. Ganhe pontos.' },
+      { type: 'paragraph', text: '20 de outubro: personalização. Volta à loja.' },
+    ] });
+    ingestPublication(p, h.repo, h.engine, h.log, NOW);
+    const mass = h.repo.allEvents().find((e) => e.title.startsWith('Evento de tropas em massa'))!;
+    expect(mass).toMatchObject({ startAt: '2026-10-07', endAt: '2026-10-08', startPrecision: 'date', endPrecision: 'date' });
+    expect(mass.description).toContain('até 1º de novembro');
+    // banco com a descrição cortada em 400 caracteres (extração antiga): a nova completa, sem aviso no grupo
+    h.db.run('UPDATE events SET description = ? WHERE id = ?', mass.description!.slice(0, 400), mass.id);
+    const before = h.outbox.list().length;
+    const res = h.repo.applyEvent({ ...globalEvent({ title: mass.title, category: mass.category, startAt: '2026-10-07', startPrecision: 'date', endAt: '2026-10-08', endPrecision: 'date' }), id: mass.id, description: mass.description! }, { origin: 'collector:blog', now: NOW });
+    expect(h.repo.getEvent(mass.id)!.description).toContain('até 1º de novembro');
+    h.engine.onEventApplied(res, NOW);
+    expect(h.outbox.list()).toHaveLength(before);
   });
 
   it('mesmo evento em blog e inbox: um só evento com duas fontes', () => {

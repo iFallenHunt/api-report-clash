@@ -3,7 +3,7 @@ import type { Db } from '../../db/index.js';
 import { nowIso } from '../../domain/dates.js';
 import type { Logger } from '../../logger.js';
 import type { Engine } from '../../scheduler/engine.js';
-import { extractEvents } from './extract.js';
+import { EXTRACTOR_VERSION, extractEvents } from './extract.js';
 import type { AnnouncementSource, Publication } from './types.js';
 
 export interface CollectorRunResult {
@@ -40,7 +40,7 @@ export function announcementsHealth(db: Db): { lastOkAt: string | null; lastFail
  */
 export function ingestPublication(pub: Publication, repo: CalendarRepo, engine: Engine | null, log: Logger, now = nowIso()): { created: number; updated: number; changed: boolean } {
   const { changed, isNew } = repo.upsertPublication(
-    { id: pub.id, sourceKind: pub.sourceKind, url: pub.url, locale: pub.locale, title: pub.title, publishedAt: pub.publishedAt, payload: { title: pub.title, publishedAt: pub.publishedAt, blocks: pub.blocks } },
+    { id: pub.id, sourceKind: pub.sourceKind, url: pub.url, locale: pub.locale, title: pub.title, publishedAt: pub.publishedAt, payload: { title: pub.title, publishedAt: pub.publishedAt, blocks: pub.blocks, extractor: EXTRACTOR_VERSION } },
     now,
   );
   if (!changed && !isNew) return { created: 0, updated: 0, changed: false };

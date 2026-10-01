@@ -249,7 +249,9 @@ export class CalendarRepo {
       const upgrade = !isManual && generic(existing.category) && !generic(input.category);
       propose('category', input.category, isManual || upgrade);
       propose('title', input.title, isManual || upgrade);
-      propose('description', input.description ?? null, input.description !== undefined && (isManual || !existing.description || upgrade));
+      // Descrição: o coletor preenche a vazia ou completa uma que tinha sido cortada (a antiga é prefixo da nova).
+      const completes = !!existing.description && !!input.description && input.description.length > existing.description.length && input.description.startsWith(existing.description.trim());
+      propose('description', input.description ?? null, input.description !== undefined && (isManual || !existing.description || upgrade || completes));
 
       // Datas: coleta parcial (precisão unknown) nunca apaga uma data conhecida; coletor nunca
       // rebaixa datetime → date no mesmo dia (ex.: calendário mensal só com dias vs post com horário).

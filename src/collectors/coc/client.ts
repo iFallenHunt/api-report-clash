@@ -3,7 +3,7 @@
  * - Autenticação: Bearer JWT criado no portal, vinculado a IPs públicos permitidos.
  * - Limite de requisições: não publicado; HTTP 429 ao exceder (respeitamos Retry-After).
  * - Endpoints usados: /clans/{tag}, /clans/{tag}/currentwar, /clans/{tag}/currentwar/leaguegroup,
- *   /clanwarleagues/wars/{warTag}, /clans/{tag}/capitalraidseasons.
+ *   /clanwarleagues/wars/{warTag}, /clans/{tag}/capitalraidseasons, /clans/{tag}/warlog (só com log público).
  * Não existe endpoint de calendário, Jogos do Clã ou eventos especiais.
  */
 export class CocApiError extends Error {
@@ -94,7 +94,10 @@ export class CocClient {
   }
 
   clan(tag: string) {
-    return this.get<{ name: string; tag: string; isWarLogPublic?: boolean; members?: number }>(`/clans/${encodeTag(tag)}`);
+    return this.get<RawClan>(`/clans/${encodeTag(tag)}`);
+  }
+  warLog(tag: string, limit = 5) {
+    return this.get<{ items: RawWarLogEntry[] }>(`/clans/${encodeTag(tag)}/warlog?limit=${limit}`);
   }
   currentWar(tag: string) {
     return this.get<RawWar>(`/clans/${encodeTag(tag)}/currentwar`);
@@ -127,10 +130,33 @@ export interface RawWar {
   clan?: RawWarClan;
   opponent?: RawWarClan;
 }
+export interface RawClan {
+  name: string;
+  tag: string;
+  clanLevel?: number;
+  members?: number;
+  isWarLogPublic?: boolean;
+  warWins?: number;
+  warLosses?: number;
+  warTies?: number;
+  warWinStreak?: number;
+  warLeague?: { name?: string };
+  capitalLeague?: { name?: string };
+  clanCapital?: { capitalHallLevel?: number };
+}
+/** Guerra encerrada no war log. Entradas da Liga de Guerra vêm sem adversário nem resultado. */
+export interface RawWarLogEntry {
+  result?: 'win' | 'lose' | 'tie' | null;
+  endTime?: string;
+  teamSize?: number;
+  attacksPerMember?: number;
+  clan?: RawWarClan;
+  opponent?: RawWarClan;
+}
 export interface RawLeagueGroup {
   state: 'preparation' | 'inWar' | 'ended' | 'notInWar';
   season: string;
-  clans?: { tag: string; name: string }[];
+  clans?: { tag: string; name: string; clanLevel?: number; members?: unknown[] }[];
   rounds?: { warTags: string[] }[];
 }
 export interface RawRaidSeason {

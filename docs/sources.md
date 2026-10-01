@@ -11,13 +11,16 @@ Validado em 2026-09-24 contra as fontes reais. Tudo o que está aqui foi verific
 
 | Endpoint | Uso no bot | Observação |
 |---|---|---|
-| `GET /clans/{tag}` | validação da tag (`poll:once clan`) | |
+| `GET /clans/{tag}` | panorama do clã nos relatórios: nível, membros, liga de guerra e da capital, vitórias/derrotas/empates, sequência | |
+| `GET /clans/{tag}/warlog?limit=5` | últimos resultados de guerra comum; fecha com o placar oficial uma guerra que acabou com o bot parado | só com log público (com log privado o passo é pulado); entradas da Liga vêm sem adversário e são ignoradas |
 | `GET /clans/{tag}/currentwar` | guerra atual: preparação, batalha, encerrada | HTTP 403 se o log de guerra do clã for privado |
-| `GET /clans/{tag}/currentwar/leaguegroup` | grupo da Liga de Guerra (temporada, rodadas) | HTTP 404 fora da Liga |
+| `GET /clans/{tag}/currentwar/leaguegroup` | grupo da Liga de Guerra (temporada, rodadas, nível e escalação de cada clã) | HTTP 404 fora da Liga |
 | `GET /clanwarleagues/wars/{warTag}` | cada guerra da Liga em que o clã participa | |
 | `GET /clans/{tag}/capitalraidseasons?limit=1` | Fim de Semana de Raides atual (`ongoing`/`ended`, saque, medalhas) | |
 
 **Não existe** endpoint de calendário mensal, Jogos do Clã, eventos especiais, temporadas ou recompensas. Esses dados só saem dos anúncios oficiais (seção 2).
+
+Relatórios (mensal e semanal) trazem a seção "Nosso clã" montada só com esses dados: rodadas da Liga com adversário e horários reais (rodadas futuras: "saem quando a rodada começar", nunca horário inventado), últimos resultados, raides. Com dados do clã com mais de 30 minutos, a seção traz um alerta. O item genérico da Liga do blog vira apenas o "Período" dentro da seção.
 
 Frequência: `POLL_CLAN_MINUTES` (padrão 5). A detecção de início/fim de guerra e raide depende desse intervalo e da própria atualização da API; um aviso pode sair até 5 minutos depois do fato.
 
@@ -53,7 +56,8 @@ A extração é determinística (sem IA, sem regex genérica sobre prosa). Só r
 | Prêmios em tabela de caminho | tabela com coluna de nível (Nível/Level/Tier) e colunas grátis/pago (ou coluna de recompensa) | prêmios com `condition = "Nível N"` e tier pela coluna |
 | Loja do evento | tabela com colunas item + preço (+ limite), ou lista sob título de loja/Comerciante se não houver tabela | itens `kind: "shop"` com preço e limite; exibidos em seção própria, nunca como prêmio garantido |
 | Tabelas de probabilidade (baús, drops) | cabeçalho ou parágrafo anterior com "Probabilidade/Chance/%" | **ignoradas** sempre |
-| Recompensas em prosa, imagens/vídeos | não são interpretados | `rewards_status = unverified` + pendência `rewards_unverified` |
+| Recompensas em prosa | não são interpretadas nem reescritas: as mensagens **citam literalmente** as frases da descrição oficial que falam de recompensa (recompensas/prêmio/resgatar/ganhar/visual exclusivo/decoração exclusiva/loja aberta até…), no máximo 3 por evento; frases de loja saem como "Loja do evento (não é prêmio garantido)"; frases com probabilidade/%/chance nunca entram | `rewards_status = unverified` (citação ≠ lista verificada) + pendência `rewards_unverified` |
+| Imagens/vídeos | não são interpretados | sem citação possível |
 
 O que **exige intervenção manual** (importação JSON via `npm run import`):
 - recompensas quando a fonte não tem lista estruturada sob um título de recompensas (é o caso mais comum nos posts de evento de medalhas: os prêmios estão em prosa e tabelas de probabilidade);

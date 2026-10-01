@@ -6,6 +6,8 @@ import type { Db } from '../db/index.js';
 import { addHours, computeStatus, durationMs, nowIso, yearMonth } from '../domain/dates.js';
 import type { ClashEvent } from '../domain/types.js';
 import type { Logger } from '../logger.js';
+import type { ClanInfoSnapshot, CwlGroupSnapshot, RaidSnapshot, WarLogEntry, WarSnapshot } from '../messages/clan.js';
+import type { ClanReport } from '../messages/clan-report.js';
 import { noticeAnnounced, noticeCancelled, noticeChanged, noticeReminder, noticeStarted } from '../messages/notices.js';
 import { buildMonthlyReport, buildMonthlyUpdate, buildWeeklyReport, type MonthlyDiff, type ReportContext } from '../messages/reports.js';
 import type { Outbox } from '../outbox/queue.js';
@@ -42,7 +44,34 @@ export class Engine {
 
   private ctx(now: string): ReportContext {
     const h = this.d.announcementsHealth();
-    return { tz: this.tz, now: new Date(now), announcementsCheckedAt: h.lastOkAt, announcementsUnavailable: h.lastFailed };
+    return { tz: this.tz, now: new Date(now), announcementsCheckedAt: h.lastOkAt, announcementsUnavailable: h.lastFailed, clan: this.clanReport(now) };
+  }
+
+  /** Estado do clã coletado da API (clan_state) para a seção "Nosso clã"; null se nunca houve coleta. */
+  clanReport(now = nowIso()): ClanReport | null {
+    const rows = this.d.db.all<{ kind: string; key: string; state: string; snapshot_json: string; updated_at: string }>('SELECT kind, key, state, snapshot_json, updated_at FROM clan_state');
+    if (!rows.length) return null;
+    const latest = (kind: string, by: 'key' | 'updated_at' = 'updated_at') => rows.filter((r) => r.kind === kind).sort((a, b) => b[by].localeCompare(a[by]))[0];
+    const parse = <T>(r: { snapshot_json: string } | undefined) => (r ? (JSON.parse(r.snapshot_json) as T) : null);
+    const nowMs = new Date(now).getTime();
+
+    const infoRow = latest('clan_info');
+    const currentWar =
+      rows
+        .filter((r) => r.kind === 'war' && (r.state === 'preparation' || r.state === 'inWar'))
+        .map((r) => JSON.parse(r.snapshot_json) as WarSnapshot)
+        .filter((w) => !!w.endTime && new Date(w.endTime).getTime() > nowMs)
+        .sort((a, b) => b.key.localeCompare(a.key))[0] ?? null;
+    const group = parse<CwlGroupSnapshot>(latest('cwl_group', 'key'));
+    const rounds = group ? rows.filter((r) => r.kind === 'cwl' && r.key.startsWith(`${group.season}:`)).map((r) => JSON.parse(r.snapshot_json) as WarSnapshot) : [];
+    return {
+      info: parse<ClanInfoSnapshot>(infoRow),
+      updatedAt: infoRow?.updated_at ?? null,
+      currentWar,
+      warLog: parse<WarLogEntry[]>(latest('warlog')) ?? [],
+      cwl: group ? { group, rounds } : null,
+      raid: parse<RaidSnapshot>(latest('raid', 'key')),
+    };
   }
 
   private noticeExpiry(now: string) {

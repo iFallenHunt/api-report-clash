@@ -2,7 +2,8 @@ import { DateTime } from 'luxon';
 import { displayDateTime, displayStatus, eventWindow, formatMonthName, formatWhen, humanDuration, PHASE_NOTE, type DisplayStatus } from '../domain/dates.js';
 import { REWARD_CATEGORIES } from '../domain/types.js';
 import type { ClashEvent } from '../domain/types.js';
-import { FOOTER_TZ, bold, compactLine, eventSummaryLine, isMinorCategory, joinBlocks, sourcesBlock } from './format.js';
+import { clanSection, coversCwl, type ClanReport } from './clan-report.js';
+import { FOOTER_TZ, bold, compactLine, compactLines, eventSummaryLine, isMinorCategory, joinBlocks, sourcesBlock } from './format.js';
 
 export interface ReportContext {
   tz: string;
@@ -11,6 +12,8 @@ export interface ReportContext {
   announcementsCheckedAt: string | null;
   /** true quando a última tentativa de coleta falhou. */
   announcementsUnavailable: boolean;
+  /** Dados reais do clã (API oficial). Com eles, guerra/liga/raides saem na seção "Nosso clã". */
+  clan?: ClanReport | null;
 }
 
 function within(ev: ClashEvent, fromMs: number, toMs: number, tz: string): boolean {
@@ -66,7 +69,12 @@ export function buildMonthlyReport(events: ClashEvent[], yearMonth: string, ctx:
     const { start, end } = eventWindow(e, ctx.tz);
     return start !== null && start < from && end !== null && end <= dayOneEnd;
   };
-  const inMonthAll = live.filter((e) => within(e, from, to, ctx.tz) && !carriedOver(e)).sort(byStart);
+  const inMonthRaw = live.filter((e) => within(e, from, to, ctx.tz) && !carriedOver(e)).sort(byStart);
+  // Com dados da API, guerra/liga/raides do clã vão para a seção própria; o item genérico da Liga
+  // (blog, sem horário) vira só o período dentro dela.
+  const cwlFromApi = coversCwl(ctx.clan, yearMonth);
+  const cwlPeriod = cwlFromApi ? inMonthRaw.find((e) => e.scope === 'global' && e.category === 'cwl') ?? null : null;
+  const inMonthAll = ctx.clan ? inMonthRaw.filter((e) => e.scope !== 'clan' && e !== cwlPeriod) : inMonthRaw;
   const main = inMonthAll.filter((e) => !isMinorCategory(e));
   const others = inMonthAll.filter((e) => e.category === 'other');
   const undated = live.filter((e) => e.scope === 'global' && !e.startAt && st(e) !== 'ended');
@@ -74,17 +82,18 @@ export function buildMonthlyReport(events: ClashEvent[], yearMonth: string, ctx:
 
   const blocks: (string | string[] | null)[] = [];
   blocks.push(`📆 ${bold(`CALENDÁRIO DE ${formatMonthName(yearMonth, ctx.tz).toUpperCase()}`)}`);
+  if (ctx.clan) blocks.push(...clanSection(ctx.clan, { tz: ctx.tz, now: ctx.now, kind: 'monthly', yearMonth, cwlPeriod }));
   const hasAny = main.length + others.length + undated.length + cancelled.length > 0;
   if (!hasAny) blocks.push('Nenhum evento com data confirmada para este mês até agora.');
   if (main.length) {
     blocks.push(bold('Eventos confirmados'));
     for (const ev of main) blocks.push(eventSummaryLine(ev, ctx.tz, { now: ctx.now }));
   }
-  if (others.length) blocks.push([bold('🧩 Também no mês (ajustes, baús e ofertas)'), ...others.map((ev) => compactLine(ev, ctx.tz))]);
+  if (others.length) blocks.push([bold('🧩 Também no mês (ajustes, baús e ofertas)'), ...others.flatMap((ev) => compactLines(ev, ctx.tz))]);
   if (undated.length) blocks.push([bold('📣 Anunciados, ainda sem data confirmada'), ...undated.map((ev) => `• ${ev.title}`)]);
   if (cancelled.length) blocks.push([bold('❌ Cancelados'), ...cancelled.map((ev) => `• ~${ev.title}~`)]);
   blocks.push(coverageWarning(ctx));
-  blocks.push(sourcesBlock([...main, ...others, ...undated]));
+  blocks.push(sourcesBlock([...main, ...others, ...undated, ...(cwlPeriod ? [cwlPeriod] : [])]));
   blocks.push(FOOTER_TZ);
   return joinBlocks(blocks);
 }
@@ -95,7 +104,12 @@ export function buildWeeklyReport(events: ClashEvent[], ctx: ReportContext): str
   const weekEnd = nowMs + 7 * 24 * 3600_000;
   const st = (e: ClashEvent) => statusOf(e, ctx.now, ctx.tz);
   const startsInWeek = (e: ClashEvent) => st(e) === 'scheduled' && (eventWindow(e, ctx.tz).start ?? Infinity) < weekEnd;
-  const liveAll = events.filter((e) => st(e) !== 'cancelled' && st(e) !== 'ended');
+  // Com dados da API, guerra/liga/raides do clã saem na seção própria (não duplicam aqui).
+  const ym = DateTime.fromMillis(nowMs).setZone(ctx.tz).toFormat('yyyy-LL');
+  const cwlFromApi = coversCwl(ctx.clan, ym);
+  const liveAll = events.filter((e) => st(e) !== 'cancelled' && st(e) !== 'ended' && !(ctx.clan && e.scope === 'clan') && !(cwlFromApi && e.scope === 'global' && e.category === 'cwl'));
+  // Período da Liga (blog) do mesmo mês da temporada da API, nunca o de outro mês.
+  const cwlPeriod = cwlFromApi ? events.find((e) => e.scope === 'global' && e.category === 'cwl' && st(e) !== 'cancelled' && !!e.startAt && e.startAt.slice(0, 7) === ym) ?? null : null;
   const inWeek = (e: ClashEvent) => st(e) !== 'announced' && (st(e) !== 'scheduled' || startsInWeek(e));
   const main = liveAll.filter((e) => !isMinorCategory(e));
 
@@ -112,6 +126,7 @@ export function buildWeeklyReport(events: ClashEvent[], ctx: ReportContext): str
   const dt = DateTime.fromMillis(nowMs).setZone(ctx.tz).setLocale('pt-BR');
   const blocks: (string | string[] | null)[] = [];
   blocks.push(`📋 ${bold(`RESUMO DA SEMANA`)} · ${dt.toFormat("dd/LL")} a ${dt.plus({ days: 7 }).toFormat('dd/LL')}`);
+  if (ctx.clan) blocks.push(...clanSection(ctx.clan, { tz: ctx.tz, now: ctx.now, kind: 'weekly', cwlPeriod }));
 
   const sections = active.length + startingToday.length + starting.length + endingToday.length + ending.length + announced.length + others.length + cosmetics.length;
   if (!sections) blocks.push('Nenhum evento confirmado para esta semana até agora.');
@@ -134,7 +149,7 @@ export function buildWeeklyReport(events: ClashEvent[], ctx: ReportContext): str
     }
     blocks.push(lines);
   }
-  if (others.length) blocks.push([bold('🧩 Também nesta semana (ajustes, baús e ofertas)'), ...others.map((ev) => compactLine(ev, ctx.tz))]);
+  if (others.length) blocks.push([bold('🧩 Também nesta semana (ajustes, baús e ofertas)'), ...others.flatMap((ev) => compactLines(ev, ctx.tz))]);
   if (cosmetics.length) blocks.push([bold('🎨 Cosméticos e ofertas na loja'), ...cosmetics.map((ev) => compactLine(ev, ctx.tz))]);
   if (announced.length) blocks.push([bold('📣 Anunciados sem data confirmada'), ...announced.map((ev) => `• ${ev.title}`)]);
   blocks.push([rewardsReviewNote([...active, ...startingToday, ...starting, ...endingToday]), ...coverageNote(ctx)].filter((l): l is string => !!l));

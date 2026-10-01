@@ -44,12 +44,16 @@ export function isShop(r: Reward): boolean {
  * - known: prêmios separados em gratuito/pago/sem indicação; opções explicitadas; itens de loja
  *   aparecem em seção própria e nunca como prêmio garantido.
  */
-export function rewardsLines(status: RewardsStatus, rewards: Reward[], sourceUrl: string | null): string[] {
+export function rewardsLines(status: RewardsStatus, rewards: Reward[], sourceUrl: string | null, description: string | null = null): string[] {
   if (status === 'not_announced') return ['🎁 Recompensas ainda não divulgadas'];
   const prizes = rewards.filter((r) => !isShop(r));
   const shop = rewards.filter(isShop);
   const unverifiedLine = '🎁 Recompensas: não foi possível verificar automaticamente' + (sourceUrl ? ' (veja a fonte)' : '');
-  if (status === 'unverified' || rewards.length === 0) return [unverifiedLine];
+  if (status === 'unverified' || rewards.length === 0) {
+    // Sem lista estruturada: cita o que a publicação oficial diz sobre recompensas, literalmente.
+    const quotes = rewardQuotes(description);
+    return quotes.length ? rewardQuoteLines(quotes) : [unverifiedLine];
+  }
 
   const lines: string[] = [];
   if (prizes.length) {
@@ -110,4 +114,49 @@ function rewardText(r: Reward, brief = false): string {
   const base = `${qty}${r.label}`;
   if (brief || !r.condition) return base;
   return `${base} — ${r.condition}`;
+}
+
+const QUOTE_MAX_SENTENCES = 3;
+const QUOTE_MAX_CHARS = 220;
+// Frases da fonte que falam do que o jogador recebe. Probabilidades nunca entram (não são prêmio garantido).
+const REWARD_CUE = /recompens|premio|resgat|ganh(?:e|a|ar|am|em)\b|receber|para obter|visual de heroi exclusivo|opcao de visual|decoracao exclusiva|agrado|liberando |\bloja\b.*\baberta\b/;
+const PROBABILITY_CUE = /probabilidad|chance|%/;
+const SHOP_CUE = /\bloja\b/;
+
+function plain(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+export interface RewardQuote {
+  text: string;
+  /** Frase sobre a loja do evento: item trocável, nunca prêmio garantido. */
+  shop: boolean;
+}
+
+/**
+ * Trechos literais da publicação oficial sobre recompensas (quando a fonte não tem lista estruturada).
+ * Seleção determinística de frases inteiras por palavras-chave; o texto não é interpretado nem reescrito.
+ */
+export function rewardQuotes(text: string | null | undefined): RewardQuote[] {
+  if (!text) return [];
+  const sentences = text.replace(/\s+/g, ' ').trim().split(/(?<=[.!?])\s+(?=["“(]?[A-ZÁÉÍÓÚÂÊÔÃÕÇ])/);
+  const out: RewardQuote[] = [];
+  for (const raw of sentences) {
+    const s = raw.trim();
+    const p = plain(s);
+    if (!s || !REWARD_CUE.test(p) || PROBABILITY_CUE.test(p)) continue;
+    // Recompensa só dentro de um parêntese ("É aterrorizante (X é a opção de visual …)"): cita o parêntese.
+    const paren = /\(([^()]+)\)/.exec(s);
+    const outside = paren ? plain(s.replace(paren[0], '')) : p;
+    const text = paren && !REWARD_CUE.test(outside) ? `${paren[1]!.trim()}.` : s;
+    const cut = text.length > QUOTE_MAX_CHARS ? `${text.slice(0, QUOTE_MAX_CHARS - 1).replace(/\s+\S*$/, '')}…` : text;
+    out.push({ text: cut, shop: SHOP_CUE.test(plain(text)) });
+    if (out.length >= QUOTE_MAX_SENTENCES) break;
+  }
+  return out;
+}
+
+/** Linhas de citação para mensagens: loja sempre identificada como loja. */
+export function rewardQuoteLines(quotes: RewardQuote[], indent = ''): string[] {
+  return quotes.map((q) => (q.shop ? `${indent}🛒 Loja do evento (não é prêmio garantido): “${q.text}”` : `${indent}🎁 Segundo a Supercell: “${q.text}”`));
 }

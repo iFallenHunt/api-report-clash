@@ -15,6 +15,33 @@ export interface WarSnapshot {
   /** Rodada da Liga de Guerra (1..7) quando aplicável. */
   cwlRound?: number;
   cwlSeason?: string;
+  /** Resultado oficial do war log (guerra comum encerrada enquanto o bot não acompanhava). */
+  result?: 'win' | 'lose' | 'tie';
+}
+
+/** Dados gerais do clã (/clans/{tag}). */
+export interface ClanInfoSnapshot {
+  name: string;
+  tag: string;
+  level: number | null;
+  members: number | null;
+  warLeague: string | null;
+  capitalLeague: string | null;
+  capitalHallLevel: number | null;
+  warWins: number | null;
+  warLosses: number | null;
+  warTies: number | null;
+  warWinStreak: number | null;
+  isWarLogPublic: boolean | null;
+}
+
+/** Guerra comum encerrada, como consta no war log oficial. */
+export interface WarLogEntry {
+  result: 'win' | 'lose' | 'tie';
+  endTime: string;
+  teamSize: number | null;
+  opponent: { name: string; tag: string; stars: number; destructionPercentage: number };
+  clan: { stars: number; destructionPercentage: number; attacks: number | null };
 }
 
 function label(w: WarSnapshot) {
@@ -90,6 +117,8 @@ export interface CwlGroupSnapshot {
   state: string;
   rounds: number;
   clans: string[];
+  /** Nível e escalação de cada clã do grupo (ausente em snapshots antigos). */
+  clanDetails?: { name: string; tag: string; level: number | null; members: number | null }[];
 }
 
 export function cwlGroupFound(g: CwlGroupSnapshot): string {

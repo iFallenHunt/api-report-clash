@@ -296,7 +296,7 @@ function parseRewardTable(rows: string[][], probabilityContext: boolean): { kind
 
 const RANGE_EN = /^([a-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*[-–]\s*(?:([a-z]+)\s+)?(\d{1,2})(?:st|nd|rd|th)?)?\s*:\s*(.+)$/i;
 // "De 1º a 30 de setembro: título. descrição", "15 de setembro: título. descrição"
-const RANGE_PT = /^(?:de\s+)?(\d{1,2})[ºo°]?(?:\s+(?:a|até|-|–)\s+(\d{1,2})[ºo°]?)?\s+de\s+([a-zç]+)\s*:\s*(.+)$/i;
+const RANGE_PT = /^(?:de\s+)?(\d{1,2})[ºo°]?(?:\s+(?:a|até|e|-|–)\s+(\d{1,2})[ºo°]?)?\s+de\s+([a-zç]+)\s*:\s*(.+)$/i;
 
 export interface RangeItem {
   title: string;
@@ -355,6 +355,14 @@ function cleanTitle(t: string): string {
   const s = t.replace(/\s+/g, ' ').replace(/[!.\s]+$/g, '').trim();
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
+
+/**
+ * Versão da extração. Faz parte do conteúdo salvo da publicação: ao mudar, cada publicação já vista
+ * é reprocessada uma vez (ex.: novos formatos de data, descrição mais longa).
+ */
+export const EXTRACTOR_VERSION = 2;
+// Descrição completa o bastante para conter as frases de recompensa da fonte (prazos de resgate, loja).
+const DESCRIPTION_MAX = 1500;
 
 export function extractEvents(pub: Publication): ExtractedEvent[] {
   const segs = segments(pub.blocks);
@@ -495,7 +503,7 @@ function build(pub: Publication, segmentKey: string, title: string, category: Ev
     category,
     scope: 'global',
     title,
-    ...(description ? { description: description.slice(0, 400) } : {}),
+    ...(description ? { description: description.slice(0, DESCRIPTION_MAX) } : {}),
     startAt: start?.iso ?? null,
     startPrecision: start?.precision ?? 'unknown',
     endAt: end?.iso ?? null,
