@@ -3,6 +3,9 @@ services:
     build: .
     image: api-report-clash:local
     restart: unless-stopped
+    # Tempo para fechar o WhatsApp/Chromium no stop (deploy, reboot). Com os 10 s padrão, numa VM pequena
+    # o Chromium é morto antes de liberar o perfil e os locks (Singleton*) impedem a próxima subida.
+    stop_grace_period: 90s
     env_file: .env
     environment:
       DB_PATH: /app/data/bot.sqlite
