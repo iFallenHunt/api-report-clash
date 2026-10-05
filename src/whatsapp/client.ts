@@ -45,6 +45,10 @@ export class WhatsAppSender implements Sender {
   private client: import('whatsapp-web.js').Client | null = null;
   private ready = false;
   private groupVerified = false;
+  /** O WhatsApp pediu QR: a sessão salva não vale mais (precisa parear de novo; reiniciar não resolve). */
+  private qrRequested = false;
+  /** Desde quando está sem conexão pronta (null = pronto). */
+  private notReadySince: number | null = Date.now();
   /** Abortado em `stop()`: encerra esperas de ACK em andamento e remove seus listeners. */
   private lifecycle = new AbortController();
 
@@ -52,6 +56,18 @@ export class WhatsAppSender implements Sender {
 
   isReady() {
     return this.ready && this.client !== null;
+  }
+
+  /** Estado para o monitoramento: pronto, pedindo QR, e há quanto tempo está fora. */
+  health(now = Date.now()): { ready: boolean; needsQr: boolean; notReadyForMs: number } {
+    const ready = this.isReady();
+    return { ready, needsQr: this.qrRequested, notReadyForMs: ready || this.notReadySince === null ? 0 : now - this.notReadySince };
+  }
+
+  private setReady(ready: boolean) {
+    if (ready === this.ready && (ready || this.notReadySince !== null)) return;
+    this.ready = ready;
+    this.notReadySince = ready ? null : Date.now();
   }
 
   async start(opts: { onQr?: (qr: string) => void } = {}): Promise<void> {
@@ -70,25 +86,35 @@ export class WhatsAppSender implements Sender {
         handleSIGINT: false,
         handleSIGTERM: false,
         handleSIGHUP: false,
+        // VM lenta: chamadas ao WhatsApp Web podem passar dos 180 s padrão ao recarregar a página; estourar
+        // esse prazo dentro do whatsapp-web.js derrubava o processo.
+        protocolTimeout: 600_000,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
       },
     });
     this.client.on('qr', (qr) => {
-      this.log.info('escaneie o QR code no terminal com o WhatsApp do número dedicado ao bot');
+      this.qrRequested = true;
+      this.setReady(false);
       if (opts.onQr) opts.onQr(qr);
-      else qrcode.generate(qr, { small: true });
+      else {
+        this.log.info('escaneie o QR code no terminal com o WhatsApp do número dedicado ao bot');
+        qrcode.generate(qr, { small: true });
+      }
     });
     this.client.on('ready', () => {
-      this.ready = true;
+      this.setReady(true);
       this.log.info('WhatsApp pronto');
     });
-    this.client.on('authenticated', () => this.log.info('WhatsApp autenticado (sessão salva em disco)'));
+    this.client.on('authenticated', () => {
+      this.qrRequested = false;
+      this.log.info('WhatsApp autenticado (sessão salva em disco)');
+    });
     this.client.on('auth_failure', (msg) => {
-      this.ready = false;
+      this.setReady(false);
       this.log.error({ msg }, 'falha de autenticação no WhatsApp; apague a sessão e escaneie o QR novamente');
     });
     this.client.on('disconnected', (reason) => {
-      this.ready = false;
+      this.setReady(false);
       this.log.warn({ reason }, 'WhatsApp desconectado; envios pausados até reconectar');
     });
     await this.client.initialize();
@@ -173,7 +199,7 @@ export class WhatsAppSender implements Sender {
   }
 
   async stop() {
-    this.ready = false;
+    this.setReady(false);
     this.lifecycle.abort();
     await this.client?.destroy().catch(() => undefined);
     this.client = null;

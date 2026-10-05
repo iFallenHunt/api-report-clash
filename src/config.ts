@@ -81,6 +81,15 @@ const envSchema = z.object({
   MESSAGE_MAX_CHARS: int(3000, 500),
 
   HTTP_PORT: int(8080),
+
+  // Monitoramento de entrega (ver src/monitor.ts)
+  // WhatsApp fora por mais que isso (sem precisar de QR): o serviço reinicia de forma ordenada.
+  WA_RESTART_AFTER_MINUTES: int(10, 2),
+  // Relatório agendado não entregue até X minutos depois do horário: vira problema no /health e no alerta.
+  REPORT_OVERDUE_MINUTES: int(15, 1),
+  // URL de ping de um "dead man's switch" (ex.: https://hc-ping.com/<uuid>). Pinga só com tudo OK; com problema
+  // envia /fail. Sem ping no prazo (VM ou Docker fora), o serviço externo alerta. Segredo: nunca é registrado.
+  HEALTHCHECK_PING_URL: optStr,
 });
 
 export type ReminderAnchor = 'start' | 'end';
@@ -111,6 +120,7 @@ export interface AppConfig {
     maxChars: number;
   };
   httpPort: number;
+  monitor: { waRestartAfterMinutes: number; reportOverdueMinutes: number; pingUrl?: string };
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -122,6 +132,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('WHATSAPP_GROUP_ID deve ser o ID de um grupo (termina com @g.us)');
   }
   // O lease cobre uma parte (renovado a cada parte); precisa sobrar tempo além da espera pelo ACK.
+  if (e.HEALTHCHECK_PING_URL && !/^https:\/\//.test(e.HEALTHCHECK_PING_URL)) {
+    throw new Error('HEALTHCHECK_PING_URL deve começar com https://');
+  }
   if (e.SEND_LEASE_SECONDS < e.WA_ACK_TIMEOUT_SECONDS + 30) {
     throw new Error('SEND_LEASE_SECONDS deve ser pelo menos WA_ACK_TIMEOUT_SECONDS + 30');
   }
@@ -163,6 +176,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       maxChars: e.MESSAGE_MAX_CHARS,
     },
     httpPort: e.HTTP_PORT,
+    monitor: { waRestartAfterMinutes: e.WA_RESTART_AFTER_MINUTES, reportOverdueMinutes: e.REPORT_OVERDUE_MINUTES, pingUrl: e.HEALTHCHECK_PING_URL },
   };
 }
 

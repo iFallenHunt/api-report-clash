@@ -156,6 +156,8 @@ curl -fsS http://127.0.0.1:8080/health  # "whatsapp":"ready" em ~2-5 min
 Nunca em produção: `git reset --hard`, `docker volume rm`, `docker compose down -v` (apaga banco e sessão), editar `outbox`/`report_marks`/`clan_state` à mão.
 
 - `.env` da VM: `WA_ACK_TIMEOUT_SECONDS=60`, `SEND_LEASE_SECONDS=120`, `WA_AUTH_TIMEOUT_SECONDS=180`. Porta 8080 só em `127.0.0.1`.
+- **Garantia de entrega** (`src/monitor.ts`): "gerado" não é "entregue". A cada minuto o serviço verifica se o WhatsApp está pronto, se pediu QR (sessão inválida) e se o relatório agendado do período está `sent` (ACK) até `REPORT_OVERDUE_MINUTES` depois do horário. Com problema: log de erro, `/health` em **503** com a lista em `problems`, e `HEALTHCHECK_PING_URL` recebe `/fail`. WhatsApp fora por `WA_RESTART_AFTER_MINUTES` sem pedir QR → reinício ordenado (o Docker sobe de novo). Pedido de QR não reinicia (só se resolve pareando) e o QR nunca vai para o log do serviço.
+- **Alerta fora do WhatsApp**: crie um check em https://healthchecks.io (gratuito; período 5 min, tolerância 10–15 min, integração por e-mail/Telegram) e ponha a URL de ping em `HEALTHCHECK_PING_URL`. Ele alerta tanto no `/fail` quanto quando os pings param (bot, Docker ou VM fora).
 - Comandos `wa:*` em `docker compose run` abrem a mesma sessão do serviço: rode-os só com o serviço parado (`docker compose stop -t 90 bot`).
 - `docker run --env-file .env` não remove aspas (`CLAN_TAG="#…"` vira tag inválida, HTTP 404); use `docker compose run`, que remove.
 - **Pareamento do WhatsApp**: numa VM de 1 GB o pareamento por QR costuma cair (`LOGOUT` logo após escanear). Pareie numa máquina mais forte com a **mesma imagem** e copie a sessão para o volume `wa-session` (com o serviço parado):

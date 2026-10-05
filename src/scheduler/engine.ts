@@ -228,6 +228,28 @@ export class Engine {
     return true;
   }
 
+  /**
+   * Relatórios agendados que deveriam ter sido entregues e não foram (modo da fila): passados
+   * REPORT_OVERDUE_MINUTES do horário, até 24 h depois. "Gerado" não basta: só conta `sent` (ACK do WhatsApp).
+   */
+  overdueReports(now = nowIso()): { kind: 'monthly' | 'weekly'; key: string; scheduledAt: string; status: string }[] {
+    const nowMs = new Date(now).getTime();
+    const graceMs = this.d.cfg.monitor.reportOverdueMinutes * 60_000;
+    const out: { kind: 'monthly' | 'weekly'; key: string; scheduledAt: string; status: string }[] = [];
+    for (const [kind, expr] of [['monthly', this.d.cfg.schedule.monthlyCron], ['weekly', this.d.cfg.schedule.weeklyCron]] as const) {
+      const prev = new Cron(expr, { timezone: this.tz }).previousRuns(1, new Date(nowMs))[0];
+      if (!prev) continue;
+      const age = nowMs - prev.getTime();
+      if (age < graceMs || age > 24 * 3600_000) continue;
+      const key = this.reportKey(kind, prev.toISOString());
+      const item = this.d.outbox.getByKey(key);
+      if (item?.status === 'sent') continue;
+      const marked = !!this.d.db.get('SELECT 1 FROM report_marks WHERE mode = ? AND key = ?', this.d.outbox.mode, key);
+      out.push({ kind, key, scheduledAt: prev.toISOString(), status: item ? item.status : marked ? 'gerado sem item na fila' : 'não gerado' });
+    }
+    return out;
+  }
+
   /** Após reinício: gera relatório perdido só se a última execução prevista foi há menos de REPORT_CATCHUP_HOURS. */
   catchUp(now = nowIso()) {
     const nowDate = new Date(now);
